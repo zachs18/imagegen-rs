@@ -1,0 +1,25 @@
+[package]
+name = "imagegen"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+f32 = []
+sdl = []
+framebuffer = []
+
+[dependencies]
+rand = { version = "0.8.5", features = ["getrandom"] }
+regex = "1.6.0"
+lazy_static = "1.4.0"
+tokio = { version = "1.21.2", default-features = false, features = ["sync", "rt"] }
+log = "0.4.17"
+env_logger = "0.9.1"
+libc = "0.2.134"
+rand_chacha = "0.3.1"
+
+[dependencies.getopt]
+path = "../getopt"
+
+[dependencies.bitmap]
+path = "../bitmap"
