@@ -32,10 +32,10 @@ pub trait Generator: std::fmt::Debug {
     fn offsets(&self) -> &[Offset];
 }
 
-fn place_seeds_common(count: NonZeroUsize, width: usize, height: usize, data: &mut CommonLockedData, color_generator: &dyn ColorGenerator, rng: &mut dyn RngCore) -> Vec<Pixel> {
+fn place_seeds_common(count: usize, width: usize, height: usize, data: &mut CommonLockedData, color_generator: &dyn ColorGenerator, rng: &mut dyn RngCore) -> Vec<Pixel> {
     log::trace!("placing {count} seeds");
-    let mut placed = Vec::with_capacity(count.get());
-    for _ in 0..count.get() {
+    let mut placed = Vec::with_capacity(count);
+    for _ in 0..count {
         'retry: loop {
             let y = rng.gen_range(0..height);
             let x = rng.gen_range(0..width);
@@ -111,15 +111,15 @@ impl Generator for InnerGenerator {
         // Place seeds
         {
             let mut locked = common_data.locked.write().unwrap();
-            let seed_locations = place_seeds_common(self.seeds, common_data.width, common_data.height, &mut locked, color_generator, rng);
-            common_data.pixels_generated.fetch_add(seed_locations.len(), Ordering::Relaxed);
-            common_data.pixels_placed.fetch_add(seed_locations.len(), Ordering::Relaxed);
+            let seed_locations = place_seeds_common(self.seeds.get(), common_data.width, common_data.height, &mut locked, color_generator, rng);
+            common_data.pixels_generated.fetch_add(seed_locations.len(), Ordering::SeqCst);
+            common_data.pixels_placed.fetch_add(seed_locations.len(), Ordering::SeqCst);
             locked.edges.extend(seed_locations);
         }
 
         // Main loop
         if self.workers.get() == 1 {
-            log::error!("single-thread generator not yet implemented");
+            log::error!("single-thread generator not yet implemented. Run with '-w 2' or above.");
             todo!("single-thread generator main loop");
         } else {
             /// Supervisor sends the colors to the worker, the worker calculates the best places,
@@ -138,7 +138,7 @@ impl Generator for InnerGenerator {
             let (colors_tx, _) = tokio::sync::broadcast::channel(1);
             let (best_places_tx, mut best_places_rx) = tokio::sync::mpsc::channel(self.workers.get());
 
-            for i in 0..self.workers.get() {
+            for _ in 0..self.workers.get() {
                 let (edges_tx, edges_rx) = tokio::sync::mpsc::channel(1);
                 edges_txs.push(edges_tx);
                 let data = WorkerData {
@@ -153,7 +153,7 @@ impl Generator for InnerGenerator {
                     let mut data = data;
                     let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
                     rt.block_on(async move {
-                        while !data.common_data.finished.load(Ordering::Relaxed) {
+                        while !data.common_data.finished.load(Ordering::SeqCst) {
                             log::warn!("TODO: handle RecvError::Closed as supervisor thread exiting");
                             let colors = match data.colors_rx.recv().await {
                                 Ok(colors) => colors,
@@ -177,14 +177,14 @@ impl Generator for InnerGenerator {
                                 log::trace!("recv'd edge range: {my_edges:?}");
 
                                 for edge in my_edges {
-                                    let pixel@Pixel { x, y } = locked.edges[edge];
+                                    let pixel@Pixel { x, y } = edges[edge];
                                     // TODO: geometry
                                     let x = x as usize;
                                     let y = y as usize;
 
-                                    let color = locked.image[(y, x)];
+                                    let color = image[(y, x)];
                                     for (current_best, new_color) in best_places.iter_mut().zip(&*colors) {
-                                        // let fitness = fitness(*color, &locked.image)
+                                        // let fitness = fitness(*color, &image)
                                         // TODO: configurable fitness function
                                         let diff = color - new_color;
                                         let sq_diff = diff * diff;
@@ -208,11 +208,34 @@ impl Generator for InnerGenerator {
 
             let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
 
-            while !common_data.finished.load(Ordering::Relaxed) {
-                let mut best_places = vec![None; self.colorcount.get()];
-                rt.block_on(async {
+            rt.block_on(async {
+                loop {
+                    let mut best_places = vec![None; self.colorcount.get()];
                     {
-                        let locked = common_data.locked.read().unwrap();
+                        let mut locked = common_data.locked.read().unwrap();
+                        
+                        // If there are no edges left, seed again
+                        if locked.edges.len() == 0 {
+                            log::trace!("re-seeding");
+                            drop(locked);
+                            {
+                                let mut locked = common_data.locked.write().unwrap();
+                                let seed_locations = place_seeds_common(1, common_data.width, common_data.height, &mut locked, color_generator, rng);
+                                common_data.pixels_generated.fetch_add(seed_locations.len(), Ordering::SeqCst);
+                                common_data.pixels_placed.fetch_add(seed_locations.len(), Ordering::SeqCst);
+                                locked.edges.extend(seed_locations);
+                            }
+                            locked = common_data.locked.read().unwrap();
+                        }
+
+                        log::trace!("before progress barrier a");
+                        common_data.progress_barrier.wait();
+                        log::trace!("afterprogress barrier a");
+                        if common_data.finished.load(Ordering::SeqCst) {
+                            log::error!("generator breaking");
+                            break;
+                        }
+
                         let edgecount = locked.edges.len();
                         let step = edgecount / edges_txs.len();
                         log::trace!("sending edge ranges: {} (slices of {:?}", edges_txs.len(), 0..edgecount);
@@ -227,21 +250,30 @@ impl Generator for InnerGenerator {
                         }
                     }
                     let colors = generate_colors(color_generator, rng);
+                    common_data.pixels_generated.fetch_add(colors.len(), Ordering::SeqCst);
                     log::trace!("sending colors");
                     colors_tx.send(colors.clone()).expect("Worker threads should be running");
 
-                    // Wait for workers (no-op)
+                    // Ensure all progressors have read what they need to
+                    log::trace!("before progress barrier b");
+                    common_data.progress_barrier.wait();
+                    log::trace!("afterprogress barrier b");
 
+                    // Wait for workers (happens at best_places_rx.recv())
                     // Coalesce worker results into best_places
                     for _ in 0..self.workers.get() {
                         let best_places_recvd = best_places_rx.recv().await.expect("worker thread exited early?");
                         debug_assert!(best_places_recvd.len() == best_places.len(), "worker returned wrong length?");
                         for (best, worker) in best_places.iter_mut().zip(best_places_recvd) {
-                            match (&*best, &worker) {
-                                (_, None) => { /* do nothing */},
-                                (None, Some(_)) => *best = worker,
-                                (Some((_, fitness)), Some((_, wfitness))) => {
-                                    if wfitness < fitness {
+                            match (&*best, &worker, self.maxfitness) {
+                                (_, None, _) => { /* do nothing */},
+                                (None, Some(_), None) => *best = worker,
+                                (None, Some((_, fitness)), Some(maxfitness)) => if *fitness < maxfitness {
+                                    *best = worker
+                                },
+                                (Some((_, bfitness)), Some((_, wfitness)), _) => {
+                                    // Don't need to check maxfitness, since the best fitness already satisfies that
+                                    if wfitness < bfitness {
                                         *best = worker;
                                     }
                                 },
@@ -264,25 +296,21 @@ impl Generator for InnerGenerator {
                         // locked.image[(y, x)] = *color;
                         // locked.placed_pixels.set((y, x), true);
                         if let Ok(_) = place_pixel_inner(common_data.height, common_data.width, pixel, *color, &mut locked.image, &mut locked.edges, &mut locked.placed_pixels, &self.offsets) {
-                            common_data.pixels_placed.fetch_add(1, Ordering::Relaxed);
+                            common_data.pixels_placed.fetch_add(1, Ordering::SeqCst);
                         } else {
                             log::warn!("failed to place pixel at {pixel:?}");
                         }
                     }
-                    if common_data.pixels_placed.load(Ordering::Relaxed) == common_data.size {
-                        common_data.finished.store(true, Ordering::Relaxed);
+                    if common_data.pixels_placed.load(Ordering::SeqCst) == common_data.size {
+                        common_data.finished.store(true, Ordering::SeqCst);
                     } else {
                         validate_inner_edges(common_data.height, common_data.width, &mut locked.edges, &mut locked.placed_pixels, &self.offsets);
                     }
-                    log::trace!("before progress barrier");
-                    common_data.progress_barrier.wait();
-                    log::trace!("afterprogress barrier");
-                });
-
-            }
+                }
+            });
             drop(colors_tx);
             for handle in handles {
-                handle.join();
+                handle.join().unwrap_or_else(|err| log::error!("Worker panicked: {err:?}"));
             }
         }
     }

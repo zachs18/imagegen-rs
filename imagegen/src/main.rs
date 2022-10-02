@@ -7,15 +7,14 @@ mod color;
 mod generate;
 mod progress;
 mod pnmdata;
+mod geometry;
 
 use bitmap::BitMap;
-use color::ColorGenerator;
-use generate::{Offset, Pixel};
+use generate::Pixel;
 use getopt::Getopt;
 use pnmdata::PnmData;
-use progress::Progressor;
 
-use crate::{generate::GeneratorData, progress::ProgressData};
+use crate::generate::GeneratorData;
 
 pub struct CommonLockedData {
     //geometry: Arc<dyn Geometry>,
@@ -23,6 +22,9 @@ pub struct CommonLockedData {
     placed_pixels: BitMap,
     /// Represents to-be-placed pixels
     edges: VecDeque<Pixel>,
+    // TODO: 
+    // Pixels placed since the last iteration. Can be used to optimize progressors
+    // recently_placed: VecDeque<Pixel>,
 }
 
 pub struct CommonData {
@@ -78,6 +80,7 @@ fn main() {
     let getopt = Getopt::from_iter(
         chain!(
             setup::opts(),
+            geometry::opts(),
             generate::opts(),
             color::opts(),
             progress::opts(),
@@ -91,6 +94,8 @@ fn main() {
     let color_generator = color::handle_opts(&opts);
     log::trace!("color_generator: {:?}", color_generator);
     let (mut progressor, progress_data) = progress::handle_opts(&opts);
+    let geometry = geometry::handle_opts(&opts, &common_data);
+    // TODO: put geometry in common_data, maybe by having setup::handle_opts cann geometry::handle_opts
 
     let _gen_thread = std::thread::spawn({
         let common_data = common_data.clone();
@@ -104,7 +109,7 @@ fn main() {
     let _prog_thread = std::thread::spawn({
         let common_data = common_data.clone();
         move || {
-            progressor.run(progress_data, common_data);
+            progressor.run_alone(progress_data, common_data);
         }
     });
 
@@ -112,6 +117,11 @@ fn main() {
     _prog_thread.join().unwrap();
 
     let locked = Arc::get_mut(&mut common_data).expect("all other threads have exited").locked.get_mut().unwrap();
-    locked.image.write_to(&mut std::io::stdout().lock());
+    // TODO: output file
+    locked.image.write_to(&mut std::io::stdout().lock()).unwrap_or_else(|err| {
+        // TODO: better error handling (everywhere)
+        log::error!("Failed to write output image: {err:?}");
+        panic!("Failed to write output image");
+    });
 
 }
