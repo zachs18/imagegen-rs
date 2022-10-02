@@ -7,7 +7,7 @@ edition = "2021"
 default = ["framebuffer", "sdl2"]
 f32 = []
 sdl2 = ["dep:sdl2"]
-framebuffer = []
+framebuffer = ["dep:bindgen"]
 
 [dependencies]
 rand = { version = "0.8.5", features = ["getrandom"] }
@@ -28,4 +28,4 @@ path = "../bitmap"
 
 
 [build-dependencies]
-bindgen = "0.60.1"
+bindgen = { version = "0.60.1", optional = true }

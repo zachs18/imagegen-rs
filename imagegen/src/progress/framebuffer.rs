@@ -1,4 +1,4 @@
-use std::{path::PathBuf, os::fd::AsRawFd, mem::MaybeUninit, pin::Pin, fs::File, sync::atomic::Ordering};
+use std::{path::PathBuf, os::fd::AsRawFd, mem::MaybeUninit, pin::Pin, fs::File, sync::atomic::Ordering, io::Error};
 
 use crate::{progress::NoOpProgressor, color::Color};
 
@@ -11,7 +11,6 @@ pub struct FramebufferProgressor {
 }
 
 pub struct MmappedFramebuffer {
-    fb: File,
     ptr: *mut u8,
     len: usize,
     stride: usize,
@@ -61,7 +60,7 @@ impl Progressor for FramebufferProgressor {
     fn run_under_supervisor<'a>(&'a mut self, data: super::ProgressData, common_data: &'a super::ProgressSupervisorData<'a>) -> Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
         let noop_fallback: &'static mut NoOpProgressor = Box::leak(Box::new(NoOpProgressor));
         
-        let fb = match std::fs::File::options().write(true).read(true).open(&self.fb_path) {
+        let fb = match File::options().write(true).read(true).open(&self.fb_path) {
             Ok(fb) => fb,
             Err(err) => {
                 log::error!("Failed to open framebuffer {:?}: {}", self.fb_path, err);
@@ -76,14 +75,14 @@ impl Progressor for FramebufferProgressor {
 
             // Get framebuffer fixed screen information
             if libc::ioctl(fbfd, raw::FBIOGET_FSCREENINFO, finfo.as_mut_ptr()) != 0 {
-                let err = std::io::Error::last_os_error();
+                let err = Error::last_os_error();
                 log::error!("Failed to read framebuffer fixed information: {err}");
                 return noop_fallback.run_under_supervisor(data, common_data);
             }
 
             // Get framebuffer variable screen information
             if libc::ioctl(fbfd, raw::FBIOGET_VSCREENINFO, vinfo.as_mut_ptr()) != 0 {
-                let err = std::io::Error::last_os_error();
+                let err = Error::last_os_error();
                 log::error!("Failed to read framebuffer variable information: {err}");
                 return noop_fallback.run_under_supervisor(data, common_data);
             }
@@ -109,15 +108,17 @@ impl Progressor for FramebufferProgressor {
                 0,
             );
             if ptr as isize == -1 {
-                let err = std::io::Error::last_os_error();
+                let err = Error::last_os_error();
                 log::error!("Failed to mmap framebuffer into memory: {err}");
                 return noop_fallback.run_under_supervisor(data, common_data);
             }
             ptr.cast()
         };
+        // POSIX (and Linux) says it's fine to close a file after you mmap it;
+        // the mmap'ed region stays.
+        drop(fb);
 
         let mut framebuffer = MmappedFramebuffer {
-            fb,
             ptr,
             len: screensize,
             stride: finfo.line_length as usize,
@@ -142,7 +143,7 @@ impl Progressor for FramebufferProgressor {
             loop {
                 common_data.progress_barrier.wait().await;
                 let now = Instant::now();
-                if now - last_update >= update_interval {
+                if now - last_update >= update_interval || common_data.finished.load(Ordering::SeqCst) {
                     last_update = now;
                     let locked = common_data.locked.read().unwrap();
                     for y in 0..common_data.height {

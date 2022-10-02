@@ -1,10 +1,10 @@
-use std::{sync::{Barrier, atomic::{AtomicBool, AtomicUsize}, RwLock, Arc}, io::BufWriter, collections::VecDeque};
+use std::{sync::{Barrier, RwLock, Arc}, collections::VecDeque};
 
 use bitmap::BitMap;
 use getopt::{Opt, GetoptItem};
 use rand::{RngCore, SeedableRng};
 
-use crate::{pnmdata::PnmData, generate::Pixel, CommonData, color::Color, CommonLockedData};
+use crate::{pnmdata::PnmData, CommonData, color::Color, CommonLockedData};
 
 pub fn opts() -> impl IntoIterator<Item = Opt> {
     [

@@ -164,7 +164,7 @@ pub fn handle_opts(opts: &[GetoptItem]) -> (Box<dyn Progressor + Send>, Progress
             GetoptItem::Opt { opt, arg: None } if opt.long.as_deref() == Some("SDL") => {
                 todo!("figure out SDL handling")
             },
-            GetoptItem::Opt { opt, arg: Some(wait_time) } if opt.long.as_deref() == Some("wait") => {
+            GetoptItem::Opt { opt, arg: Some(_wait_time_str) } if opt.long.as_deref() == Some("wait") => {
                 todo!("figure out wait handling")
             },
             #[cfg(feature = "framebuffer")]
@@ -173,7 +173,7 @@ pub fn handle_opts(opts: &[GetoptItem]) -> (Box<dyn Progressor + Send>, Progress
                 progressors.push(Box::new(framebuffer::FramebufferProgressor { fb_path }));
             },
             #[cfg(not(feature = "framebuffer"))]
-            GetoptItem::Opt { opt, arg } if opt.long.as_deref() == Some("framebuffer") => {
+            GetoptItem::Opt { opt, .. } if opt.long.as_deref() == Some("framebuffer") => {
                 log::error!("Compiled without framebuffer support. Ignoring '--framebuffer' argument.");
             },
             _ => {},
