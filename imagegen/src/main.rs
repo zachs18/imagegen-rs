@@ -51,7 +51,12 @@ macro_rules! chain {
 fn main() {
     env_logger::builder().format(|f, record| {
         use std::io::Write;
-        let tid = unsafe { libc::gettid() };
+        #[cfg(target_os = "linux")]
+        let tid_or_pid = unsafe { libc::gettid() };
+        #[cfg(all(unix, not(target_os = "linux")))]
+        let tid_or_pid = unsafe { libc::getpid() };
+        #[cfg(not(unix))]
+        let tid_or_pid = "<unknown tid>";
         let color = match record.level() {
             log::Level::Error => "31;1",
             log::Level::Warn => "33;1",
@@ -65,7 +70,7 @@ fn main() {
             color,
             record.level(),
             record.target(),
-            tid,
+            tid_or_pid,
             record.file().unwrap_or("<unknown>"),
             match record.line() {
                 Some(line) => format!("{}", line),
