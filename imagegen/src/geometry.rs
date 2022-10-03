@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, num::NonZeroUsize};
 
 use getopt::{Opt, GetoptItem};
 
@@ -13,19 +13,50 @@ pub trait Geometry {
     fn canonicalize(&self, location: Pixel) -> Option<CanonicalPixel>;
 }
 
-struct NormalGeometry {
-    dimx: usize,
-    dimy: usize,
+struct NSWrappingGeometry<const NS_WRAP: bool, const EW_WRAP: bool> {
+    /// Must be <= isize::MAX
+    dimx: NonZeroUsize,
+    /// Must be <= isize::MAX
+    dimy: NonZeroUsize,
 }
 
-impl Geometry for NormalGeometry {
+struct NEWrappingGeometry<const NE_WRAP: bool, const SW_WRAP: bool> {
+    /// Must be <= isize::MAX
+    dim: NonZeroUsize,
+}
+
+#[cfg(target_pointer_width = "16")]
+compile_error!("Geometry code assumes i32 fits in isize");
+
+impl<const NS_WRAP: bool, const EW_WRAP: bool> Geometry for NSWrappingGeometry<NS_WRAP, EW_WRAP> {
     fn canonicalize(&self, location: Pixel) -> Option<CanonicalPixel> {
-        match (location.x.try_into(), location.y.try_into()) {
-            (Ok(x), Ok(y)) if x < self.dimx && y < self.dimy => Some(CanonicalPixel { x, y }),
-            _ => None,
-        }
+        // match (isize::try_from(location.x), isize::try_from(location.y)) {
+        //     (Ok(x), Ok(y)) if x < self.dimx && y < self.dimy => Some(CanonicalPixel { x, y }),
+        //     _ => None,
+        // }
+        let x: usize = if EW_WRAP {
+            // x mod self.dimx
+            (location.x as isize % self.dimx.get() as isize) as usize
+        } else {
+            match usize::try_from(location.x) {
+                Ok(x) if x < self.dimx.get() => x,
+                _ => return None,
+            }
+        };
+        let y: usize = if NS_WRAP {
+            // x mod self.dimx
+            (location.y as isize % self.dimy.get() as isize) as usize
+        } else {
+            match usize::try_from(location.y) {
+                Ok(y) if y < self.dimy.get() => y,
+                _ => return None,
+            }
+        };
+        Some(CanonicalPixel { x, y })
     }
 }
+
+type NormalGeometry = NSWrappingGeometry<false, false>;
 
 pub fn opts() -> impl IntoIterator<Item = Opt> {
     [
@@ -115,7 +146,7 @@ pub fn handle_opts(opts: &[GetoptItem], common_data: &CommonData) -> Arc<dyn Geo
 
     // (data, rng)
     Arc::new(NormalGeometry {
-        dimx: common_data.width,
-        dimy: common_data.height,
+        dimx: common_data.dimx,
+        dimy: common_data.dimy,
     })
 }

@@ -1,6 +1,6 @@
 #![feature(portable_simd)]
 
-use std::{sync::{Arc, RwLock, Barrier, atomic::{AtomicBool, AtomicUsize}}, collections::VecDeque};
+use std::{sync::{Arc, RwLock, Barrier, atomic::{AtomicBool, AtomicUsize}}, collections::VecDeque, num::NonZeroUsize};
 
 mod setup;
 mod color;
@@ -29,9 +29,9 @@ pub struct CommonLockedData {
 
 pub struct CommonData {
     pub locked: RwLock<CommonLockedData>,
-    pub height: usize,
-    pub width: usize,
-    pub size: usize,
+    pub dimy: NonZeroUsize,
+    pub dimx: NonZeroUsize,
+    pub size: NonZeroUsize,
     pub progress_barrier: Barrier,
     pub finished: AtomicBool,
     pub pixels_placed: AtomicUsize,

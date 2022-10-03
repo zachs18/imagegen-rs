@@ -1,4 +1,4 @@
-use std::{sync::{atomic::{AtomicBool, AtomicUsize, Ordering}, RwLock, Arc}, future::Future, pin::Pin, path::PathBuf};
+use std::{sync::{atomic::{AtomicBool, AtomicUsize, Ordering}, RwLock, Arc}, future::Future, pin::Pin, path::PathBuf, num::NonZeroUsize};
 
 use getopt::{Opt, GetoptItem};
 
@@ -20,9 +20,9 @@ pub struct ProgressData {
 /// The supervisor progressor handles the CommonData
 pub struct ProgressSupervisorData<'a> {
     pub locked: &'a RwLock<CommonLockedData>,
-    pub height: usize,
-    pub width: usize,
-    pub size: usize,
+    pub dimy: NonZeroUsize,
+    pub dimx: NonZeroUsize,
+    pub size: NonZeroUsize,
     pub progress_barrier: tokio::sync::Barrier,
     pub finished: &'a AtomicBool,
     pub pixels_placed: &'a AtomicUsize,
@@ -30,13 +30,13 @@ pub struct ProgressSupervisorData<'a> {
     pub rng_seed: u64,
 }
 
-pub trait Progressor {
+pub trait Progressor: Send {
     /// Caller should run this in a new thread
     fn run_alone(&mut self, data: ProgressData, common_data: Arc<CommonData>) {
         let supervisor_data = ProgressSupervisorData {
             locked: &common_data.locked,
-            height: common_data.height,
-            width: common_data.width,
+            dimy: common_data.dimy,
+            dimx: common_data.dimx,
             size: common_data.size,
             progress_barrier: tokio::sync::Barrier::new(2),
             finished: &common_data.finished,
@@ -55,14 +55,19 @@ pub trait Progressor {
             let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
             rt.block_on(async {
                 loop {
+                    log::trace!(target: "barriers", "before progress barrier a");
                     common_data.progress_barrier.wait();
+                    log::trace!(target: "barriers", "after progress barrier a");
+
                     supervisor_data.progress_barrier.wait().await;
                     if common_data.finished.load(Ordering::SeqCst) {
                         // Only read this betwee barriers, so we know generator thread wont change it under us
                         log::trace!("supervisor breaking loop");
                         break;
                     }
+                    log::trace!(target: "barriers", "before progress barrier b");
                     common_data.progress_barrier.wait();
+                    log::trace!(target: "barriers", "after progress barrier b");
                     supervisor_data.progress_barrier.wait().await;
                 }
                 log::trace!("supervisor exiting");
@@ -86,8 +91,8 @@ impl Progressor for ProgressSupervisor {
     fn run_alone(&mut self, data: ProgressData, common_data: Arc<CommonData>) {
         let supervisor_data = ProgressSupervisorData {
             locked: &common_data.locked,
-            height: common_data.height,
-            width: common_data.width,
+            dimy: common_data.dimy,
+            dimx: common_data.dimx,
             size: common_data.size,
             progress_barrier: tokio::sync::Barrier::new(self.progressors.len()),
             finished: &common_data.finished,

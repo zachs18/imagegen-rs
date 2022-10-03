@@ -1,4 +1,4 @@
-use std::{sync::{Barrier, RwLock, Arc}, collections::VecDeque};
+use std::{sync::{Barrier, RwLock, Arc}, collections::VecDeque, num::NonZeroUsize};
 
 use bitmap::BitMap;
 use getopt::{Opt, GetoptItem};
@@ -56,32 +56,33 @@ pub fn handle_opts(opts: &[GetoptItem]) -> (Arc<CommonData>, impl RngCore + Send
         }
     }
 
-    let (dimx, dimy) = (size.0.unwrap_or(256), size.1.unwrap_or(256));
+    const DEFAULT_SIZE: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(256) };
+
+    let (dimx, dimy) = (size.0.unwrap_or(DEFAULT_SIZE), size.1.unwrap_or(DEFAULT_SIZE));
     let maxval = maxval.unwrap_or(255);
+    let size = NonZeroUsize::new(dimx.get().checked_mul(dimy.get()).unwrap()).unwrap();
 
     let image = PnmData {
-        dimx,
-        dimy,
+        dimx: dimx.get() as u32,
+        dimy: dimy.get() as u32,
         maxval,
         depth: 3,
         comments: vec![],
-        rawdata: vec![Color::default(); (dimx as usize).checked_mul(dimy as usize).unwrap()],
+        rawdata: vec![Color::default(); size.get()],
     };
 
-    let dimx = dimx as usize;
-    let dimy = dimy as usize;
     let seed = seed.unwrap_or_else(|| rand::thread_rng().next_u64());
 
     let locked = CommonLockedData {
         image,
-        placed_pixels: BitMap::new(dimy, dimx).unwrap(),
-        edges: VecDeque::new(),
+        placed_pixels: BitMap::new(dimy.get(), dimx.get()).unwrap(),
+        edges: VecDeque::with_capacity(std::cmp::max(dimx, dimy).get() * 4),
     };
 
     let data = Arc::new(CommonData {
         locked: RwLock::new(locked),
-        height: dimy,
-        width: dimx,
+        dimy,
+        dimx,
         size: dimy.checked_mul(dimx).unwrap(),
         progress_barrier: Barrier::new(2),
         finished: false.into(),

@@ -126,12 +126,12 @@ impl Progressor for FramebufferProgressor {
             height: vinfo.yres_virtual as usize,
         };
 
-        if common_data.width > framebuffer.width {
-            log::error!("Image too wide for framebuffer ({} > {}).", common_data.width, vinfo.xres_virtual);
+        if common_data.dimx.get() > framebuffer.width {
+            log::error!("Image too wide for framebuffer ({} > {}).", common_data.dimx, vinfo.xres_virtual);
             return noop_fallback.run_under_supervisor(data, common_data);
         }
-        if common_data.height > framebuffer.height {
-            log::error!("Image too wide for framebuffer ({} > {}).", common_data.height, vinfo.yres_virtual);
+        if common_data.dimy.get() > framebuffer.height {
+            log::error!("Image too wide for framebuffer ({} > {}).", common_data.dimy, vinfo.yres_virtual);
             return noop_fallback.run_under_supervisor(data, common_data);
         }
 
@@ -146,8 +146,8 @@ impl Progressor for FramebufferProgressor {
                 if now - last_update >= update_interval || common_data.finished.load(Ordering::SeqCst) {
                     last_update = now;
                     let locked = common_data.locked.read().unwrap();
-                    for y in 0..common_data.height {
-                        for x in 0..common_data.width {
+                    for y in 0..common_data.dimy.get() {
+                        for x in 0..common_data.dimx.get() {
                             let color = locked.image[(y, x)] * Color::splat(255.0);
                             framebuffer[y][x] = *color.cast().as_array();
                         }

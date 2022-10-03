@@ -40,7 +40,7 @@ impl<F: for<'a> FnMut(std::fmt::Arguments<'a>) + Sync + Send + ?Sized> Progresso
                     }
                     let pixels_placed = pixels_placed.load(Ordering::SeqCst);
                     let pixels_generated = pixels_generated.load(Ordering::SeqCst);
-                    let percent_done = 100.0 * pixels_placed as f64 / *size as f64;
+                    let percent_done = 100.0 * pixels_placed as f64 / size.get() as f64;
                     (self.callback)(format_args!(
                         "Approximately {percent_done:4.1}% done ({progress_interval}, {prev_edge_count} edges, {pixels_placed} pixels placed, {pixels_generated} pixels generated)",
                     ));
