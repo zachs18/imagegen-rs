@@ -32,7 +32,7 @@ pub struct ProgressSupervisorData<'a> {
 
 pub trait Progressor: Send {
     /// Caller should run this in a new thread
-    fn run_alone(&mut self, data: ProgressData, common_data: Arc<CommonData>) {
+    fn run_alone(&self, data: ProgressData, common_data: Arc<CommonData>) {
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
         let progress_barrier = Arc::new(tokio::sync::Barrier::new(2));
         let fut = {
@@ -83,7 +83,7 @@ pub trait Progressor: Send {
     }
 
     /// Caller should call this function in another thread, and keep its result on that thread
-    fn make_supervised_progressor(&mut self) -> Box<dyn Send + for<'a> FnOnce(ProgressData, &'a ProgressSupervisorData<'a>) -> Pin<Box<dyn Future<Output = ()> + 'a>>>;
+    fn make_supervised_progressor(&self) -> Box<dyn Send + for<'a> FnOnce(ProgressData, &'a ProgressSupervisorData<'a>) -> Pin<Box<dyn Future<Output = ()> + 'a>>>;
 }
 
 pub struct ProgressSupervisor {
@@ -91,15 +91,15 @@ pub struct ProgressSupervisor {
 }
 
 impl Progressor for ProgressSupervisor {
-    fn make_supervised_progressor(&mut self) -> Box<dyn Send + for<'a> FnOnce(ProgressData, &'a ProgressSupervisorData<'a>) -> Pin<Box<dyn Future<Output = ()> + 'a>>> {
+    fn make_supervised_progressor(&self) -> Box<dyn Send + for<'a> FnOnce(ProgressData, &'a ProgressSupervisorData<'a>) -> Pin<Box<dyn Future<Output = ()> + 'a>>> {
         unreachable!("Cannot run ProgressSupervisor under another ProgressSupervisor")
     }
 
-    fn run_alone(&mut self, data: ProgressData, common_data: Arc<CommonData>) {
+    fn run_alone(&self, data: ProgressData, common_data: Arc<CommonData>) {
         let progress_barrier = Arc::new(tokio::sync::Barrier::new(self.progressors.len() + 1));
 
         std::thread::scope(|scope| {
-            for progressor in self.progressors.iter_mut() {
+            for progressor in &self.progressors {
                 scope.spawn({
                     let common_data = common_data.clone();
                     let progress_barrier = progress_barrier.clone();
@@ -150,7 +150,7 @@ impl Progressor for ProgressSupervisor {
 pub struct NoOpProgressor;
 
 impl Progressor for NoOpProgressor {
-    fn make_supervised_progressor(&mut self) -> Box<dyn Send + for<'a> FnOnce(ProgressData, &'a ProgressSupervisorData<'a>) -> Pin<Box<dyn Future<Output = ()> + 'a>>> {
+    fn make_supervised_progressor(&self) -> Box<dyn Send + for<'a> FnOnce(ProgressData, &'a ProgressSupervisorData<'a>) -> Pin<Box<dyn Future<Output = ()> + 'a>>> {
         Box::new(|_progress_data, common_data| Box::pin(async move {
             loop {
                 common_data.progress_barrier.wait().await;

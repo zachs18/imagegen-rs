@@ -51,7 +51,7 @@ impl<'a> IndexMut<(usize, usize)> for SdlSurfacePixelsMut<'a> {
 
 
 impl Progressor for Sdl2Progressor {
-    fn make_supervised_progressor(&mut self) -> Box<dyn Send + for<'a> FnOnce(super::ProgressData, &'a super::ProgressSupervisorData<'a>) -> Pin<Box<dyn std::future::Future<Output = ()> + 'a>>> {
+    fn make_supervised_progressor(&self) -> Box<dyn Send + for<'a> FnOnce(super::ProgressData, &'a super::ProgressSupervisorData<'a>) -> Pin<Box<dyn std::future::Future<Output = ()> + 'a>>> {
         Box::new({
             move |progress_data, common_data| {
                 let fut = async move {

@@ -13,7 +13,7 @@ impl<F: for<'a> Fn(std::fmt::Arguments<'a>)> TextProgressor<F> {
 }
 
 impl<F: for<'a> Fn(std::fmt::Arguments<'a>) + Sync + Send + ?Sized + 'static> Progressor for TextProgressor<F> {
-    fn make_supervised_progressor(&mut self) -> Box<dyn Send + for<'a> FnOnce(ProgressData, &'a ProgressSupervisorData<'a>) -> Pin<Box<dyn Future<Output = ()> + 'a>>> {
+    fn make_supervised_progressor(&self) -> Box<dyn Send + for<'a> FnOnce(ProgressData, &'a ProgressSupervisorData<'a>) -> Pin<Box<dyn Future<Output = ()> + 'a>>> {
         Box::new({
             let callback = self.callback.clone();
             move |progress_data, common_data| {

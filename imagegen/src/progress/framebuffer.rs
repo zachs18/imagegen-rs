@@ -57,7 +57,7 @@ impl Drop for MmappedFramebuffer {
 }
 
 impl Progressor for FramebufferProgressor {
-    fn make_supervised_progressor(&mut self) -> Box<dyn Send + for<'a> FnOnce(super::ProgressData, &'a super::ProgressSupervisorData<'a>) -> Pin<Box<dyn std::future::Future<Output = ()> + 'a>>> {
+    fn make_supervised_progressor(&self) -> Box<dyn Send + for<'a> FnOnce(super::ProgressData, &'a super::ProgressSupervisorData<'a>) -> Pin<Box<dyn std::future::Future<Output = ()> + 'a>>> {
         let mut noop_fallback = NoOpProgressor;
 
         let fb = match File::options().write(true).read(true).open(&self.fb_path) {
