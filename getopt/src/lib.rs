@@ -158,7 +158,7 @@ impl<'a, I: Iterator<Item = &'a str>> Iterator for GetoptIter<'a, I> {
             // -abc - nonopt
             // -> Short('a'), Short('b'), Short('c', None), NonOpt("nonopt")
 
-            // Possibilities: 
+            // Possibilities:
             // 1. -abcarg=arg
             // 2. -abc=arg=arg
             // 3. -abc arg=arg

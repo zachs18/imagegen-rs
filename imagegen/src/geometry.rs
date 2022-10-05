@@ -80,7 +80,7 @@ pub fn handle_opts(opts: &[GetoptItem], common_data: &CommonData) -> Arc<dyn Geo
     //             None => match $arg.parse() {
     //                 Ok(value) => $e = Some(value),
     //                 Err(_) => panic!("invalid {} value: {:?}", $field, $arg),
-    //             } 
+    //             }
     //         }
     //     };
     // }

@@ -28,7 +28,7 @@ pub fn handle_opts(opts: &[GetoptItem]) -> (Arc<CommonData>, impl RngCore + Send
                 None => match $arg.parse() {
                     Ok(value) => $e = Some(value),
                     Err(_) => panic!("invalid {} value: {:?}", $field, $arg),
-                } 
+                }
             }
         };
     }

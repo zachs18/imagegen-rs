@@ -45,4 +45,54 @@ impl BitMap {
     pub fn size(&self) -> (usize, usize) {
         (self.height, self.width)
     }
+
+    /// Calls `f` with each index whose bit is `true` (row, col)
+    pub fn for_each_true(&self, mut f: impl FnMut(usize, usize)) {
+        for row in 0..self.height {
+            let byte_range = row * self.stride .. (row + 1) * self.stride;
+            for (byte_col, byte) in self.data[byte_range].iter().enumerate() {
+                for bit_col in 0..8 {
+                    let col = (byte_col << 3) | bit_col;
+                    if byte & (1 << bit_col) != 0 && col < self.width {
+                        f(row, col);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Calls `f` with each index whose bit is `false` (row, col)
+    pub fn for_each_false(&self, mut f: impl FnMut(usize, usize)) {
+        for row in 0..self.height {
+            let byte_range = row * self.stride .. (row + 1) * self.stride;
+            for (byte_col, byte) in self.data[byte_range].iter().enumerate() {
+                for bit_col in 0..8 {
+                    let col = (byte_col << 3) | bit_col;
+                    if byte & (1 << bit_col) == 0 && col < self.width {
+                        f(row, col);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn count(&self) -> usize {
+        let mut count = 0;
+        for row in 0..self.height {
+            let byte_range = row * self.stride .. (row + 1) * self.stride;
+            for (byte_col, byte) in self.data[byte_range].iter().enumerate() {
+                if byte_col * 8 + 7 < self.width {
+                    count += byte.count_ones() as usize;
+                } else {
+                    for bit_col in 0..8 {
+                        let col = (byte_col << 3) | bit_col;
+                        if byte & (1 << bit_col) != 0 && col < self.width {
+                            count += 1;
+                        }
+                    }
+                }
+            }
+        }
+        count
+    }
 }

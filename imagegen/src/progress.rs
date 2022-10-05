@@ -1,4 +1,4 @@
-use std::{sync::{atomic::{AtomicBool, AtomicUsize, Ordering}, RwLock, Arc}, future::Future, pin::Pin, path::PathBuf, num::NonZeroUsize};
+use std::{sync::{atomic::{AtomicBool, AtomicUsize, Ordering}, Arc, RwLock}, future::Future, pin::Pin, path::PathBuf, num::NonZeroUsize};
 
 use getopt::{Opt, GetoptItem};
 
@@ -23,7 +23,7 @@ pub struct ProgressSupervisorData<'a> {
     pub dimy: NonZeroUsize,
     pub dimx: NonZeroUsize,
     pub size: NonZeroUsize,
-    pub progress_barrier: tokio::sync::Barrier,
+    pub progress_barrier: Arc<tokio::sync::Barrier>,
     pub finished: &'a AtomicBool,
     pub pixels_placed: &'a AtomicUsize,
     pub pixels_generated: &'a AtomicUsize,
@@ -33,50 +33,57 @@ pub struct ProgressSupervisorData<'a> {
 pub trait Progressor: Send {
     /// Caller should run this in a new thread
     fn run_alone(&mut self, data: ProgressData, common_data: Arc<CommonData>) {
-        let supervisor_data = ProgressSupervisorData {
-            locked: &common_data.locked,
-            dimy: common_data.dimy,
-            dimx: common_data.dimx,
-            size: common_data.size,
-            progress_barrier: tokio::sync::Barrier::new(2),
-            finished: &common_data.finished,
-            pixels_placed: &common_data.pixels_placed,
-            pixels_generated: &common_data.pixels_generated,
-            rng_seed: common_data.rng_seed,
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let progress_barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let fut = {
+            let common_data = common_data.clone();
+            let progress_barrier = progress_barrier.clone();
+            let func = self.make_supervised_progressor();
+            async move {
+                let supervisor_data = ProgressSupervisorData {
+                    locked: &common_data.locked,
+                    dimy: common_data.dimy,
+                    dimx: common_data.dimx,
+                    size: common_data.size,
+                    progress_barrier,
+                    finished: &common_data.finished,
+                    pixels_placed: &common_data.pixels_placed,
+                    pixels_generated: &common_data.pixels_generated,
+                    rng_seed: common_data.rng_seed,
+                };
+                func(data, &supervisor_data).await;
+            }
         };
-        std::thread::scope(|scope| {
 
-            let fut = self.run_under_supervisor(data, &supervisor_data);
-            scope.spawn(move || {
-                let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-                rt.block_on(fut);
-            });
-
-            let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-            rt.block_on(async {
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local.run_until(async {
+                let task = tokio::task::spawn_local(fut);
                 loop {
                     log::trace!(target: "barriers", "before progress barrier a");
                     common_data.progress_barrier.wait();
                     log::trace!(target: "barriers", "after progress barrier a");
 
-                    supervisor_data.progress_barrier.wait().await;
+                    progress_barrier.wait().await;
                     if common_data.finished.load(Ordering::SeqCst) {
                         // Only read this betwee barriers, so we know generator thread wont change it under us
                         log::trace!("supervisor breaking loop");
                         break;
                     }
+                    progress_barrier.wait().await;
                     log::trace!(target: "barriers", "before progress barrier b");
                     common_data.progress_barrier.wait();
                     log::trace!(target: "barriers", "after progress barrier b");
-                    supervisor_data.progress_barrier.wait().await;
                 }
+                log::trace!("joining task");
+                task.await.expect("task failed");
                 log::trace!("supervisor exiting");
-            })
+            }).await;
         });
     }
 
-    /// Caller should run this on a tokio runtime in parallel with other progressors
-    fn run_under_supervisor<'a>(&'a mut self, data: ProgressData, common_data: &'a ProgressSupervisorData<'a>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+    /// Caller should call this function in another thread, and keep its result on that thread
+    fn make_supervised_progressor(&mut self) -> Box<dyn Send + for<'a> FnOnce(ProgressData, &'a ProgressSupervisorData<'a>) -> Pin<Box<dyn Future<Output = ()> + 'a>>>;
 }
 
 pub struct ProgressSupervisor {
@@ -84,36 +91,55 @@ pub struct ProgressSupervisor {
 }
 
 impl Progressor for ProgressSupervisor {
-    fn run_under_supervisor<'a>(&'a mut self, _data: ProgressData, _common_data: &'a ProgressSupervisorData<'a>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+    fn make_supervised_progressor(&mut self) -> Box<dyn Send + for<'a> FnOnce(ProgressData, &'a ProgressSupervisorData<'a>) -> Pin<Box<dyn Future<Output = ()> + 'a>>> {
         unreachable!("Cannot run ProgressSupervisor under another ProgressSupervisor")
     }
 
     fn run_alone(&mut self, data: ProgressData, common_data: Arc<CommonData>) {
-        let supervisor_data = ProgressSupervisorData {
-            locked: &common_data.locked,
-            dimy: common_data.dimy,
-            dimx: common_data.dimx,
-            size: common_data.size,
-            progress_barrier: tokio::sync::Barrier::new(self.progressors.len()),
-            finished: &common_data.finished,
-            pixels_placed: &common_data.pixels_placed,
-            pixels_generated: &common_data.pixels_generated,
-            rng_seed: common_data.rng_seed,
-        };
+        let progress_barrier = Arc::new(tokio::sync::Barrier::new(self.progressors.len() + 1));
+
         std::thread::scope(|scope| {
             for progressor in self.progressors.iter_mut() {
-                let fut = progressor.run_under_supervisor(data.clone(), &supervisor_data);
-                scope.spawn(move || {
-                    let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-                    rt.block_on(fut);
+                scope.spawn({
+                    let common_data = common_data.clone();
+                    let progress_barrier = progress_barrier.clone();
+                    let data = data.clone();
+                    let func = progressor.make_supervised_progressor();
+                    move || {
+                        let supervisor_data = ProgressSupervisorData {
+                            locked: &common_data.locked,
+                            dimy: common_data.dimy,
+                            dimx: common_data.dimx,
+                            size: common_data.size,
+                            progress_barrier,
+                            finished: &common_data.finished,
+                            pixels_placed: &common_data.pixels_placed,
+                            pixels_generated: &common_data.pixels_generated,
+                            rng_seed: common_data.rng_seed,
+                        };
+                        let fut = func(data, &supervisor_data);
+                        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+                        rt.block_on(fut);
+                    }
                 });
             }
 
             let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
             rt.block_on(async {
-                while !common_data.finished.load(Ordering::SeqCst) {
+                loop {
+                    log::trace!(target: "barriers", "before progress barrier a");
                     common_data.progress_barrier.wait();
-                    supervisor_data.progress_barrier.wait().await;
+                    log::trace!(target: "barriers", "mid progress barrier a");
+                    progress_barrier.wait().await;
+                    log::trace!(target: "barriers", "after progress barrier a");
+                    if common_data.finished.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    log::trace!(target: "barriers", "before progress barrier b");
+                    common_data.progress_barrier.wait();
+                    log::trace!(target: "barriers", "mid progress barrier b");
+                    progress_barrier.wait().await;
+                    log::trace!(target: "barriers", "after progress barrier b");
                 }
                 log::trace!("supervisor exiting");
             })
@@ -124,8 +150,8 @@ impl Progressor for ProgressSupervisor {
 pub struct NoOpProgressor;
 
 impl Progressor for NoOpProgressor {
-    fn run_under_supervisor<'a>(&'a mut self, _data: ProgressData, common_data: &'a ProgressSupervisorData<'a>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
+    fn make_supervised_progressor(&mut self) -> Box<dyn Send + for<'a> FnOnce(ProgressData, &'a ProgressSupervisorData<'a>) -> Pin<Box<dyn Future<Output = ()> + 'a>>> {
+        Box::new(|_progress_data, common_data| Box::pin(async move {
             loop {
                 common_data.progress_barrier.wait().await;
                 if common_data.finished.load(Ordering::SeqCst) {
@@ -133,7 +159,7 @@ impl Progressor for NoOpProgressor {
                 }
                 common_data.progress_barrier.wait().await;
             }
-        })
+        }))
     }
 }
 
@@ -143,8 +169,10 @@ pub fn opts() -> impl IntoIterator<Item = Opt> {
         Opt::short_long('d', "defaultprogressfile", getopt::HasArgument::No),
         Opt::short_long('T', "progresstext", getopt::HasArgument::No),
         Opt::short_long('I', "progressinterval", getopt::HasArgument::Yes),
+        #[cfg(feature = "sdl2")]
         Opt::long("SDL", getopt::HasArgument::No),
         Opt::long("wait", getopt::HasArgument::Yes),
+        #[cfg(feature = "framebuffer")]
         Opt::long("framebuffer", getopt::HasArgument::Optional),
     ]
 }
@@ -161,13 +189,20 @@ pub fn handle_opts(opts: &[GetoptItem]) -> (Box<dyn Progressor + Send>, Progress
                 todo!("open the default filename and make progress::file::FileProgressor")
             },
             GetoptItem::Opt { opt, arg: None } if opt.long.as_deref() == Some("progresstext") => {
-                todo!("make progress::text::TextProgressor with stderr")
+                progressors.push(Box::new(text::TextProgressor::new(|s| {
+                    eprintln!("{}", s);
+                })));
             },
             GetoptItem::Opt { opt, arg: Some(progress_interval_str) } if opt.long.as_deref() == Some("progressinterval") => {
                 progress_interval = Some(progress_interval_str.parse().unwrap());
             },
+            #[cfg(feature = "sdl2")]
             GetoptItem::Opt { opt, arg: None } if opt.long.as_deref() == Some("SDL") => {
-                todo!("figure out SDL handling")
+                progressors.push(Box::new(sdl::Sdl2Progressor {}));
+            },
+            #[cfg(not(feature = "sdl2"))]
+            GetoptItem::Opt { opt, arg: None } if opt.long.as_deref() == Some("SDL") => {
+                log::error!("Compiled without sdl2 support. Ignoring '--SDL' argument.");
             },
             GetoptItem::Opt { opt, arg: Some(_wait_time_str) } if opt.long.as_deref() == Some("wait") => {
                 todo!("figure out wait handling")
@@ -197,7 +232,9 @@ pub fn handle_opts(opts: &[GetoptItem]) -> (Box<dyn Progressor + Send>, Progress
     } else if progressors.len() == 1 {
         progressors.pop().unwrap()
     } else {
-        todo!("progressor supervisor?")
+        Box::new(ProgressSupervisor {
+            progressors,
+        })
     };
 
     (progressor, data)

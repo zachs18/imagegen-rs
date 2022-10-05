@@ -22,7 +22,7 @@ pub struct CommonLockedData {
     placed_pixels: BitMap,
     /// Represents to-be-placed pixels
     edges: VecDeque<Pixel>,
-    // TODO: 
+    // TODO:
     // Pixels placed since the last iteration. Can be used to optimize progressors
     // recently_placed: VecDeque<Pixel>,
 }
@@ -120,8 +120,7 @@ fn main() {
     // TODO: output file
     locked.image.write_to(&mut std::io::stdout().lock()).unwrap_or_else(|err| {
         // TODO: better error handling (everywhere)
-        log::error!("Failed to write output image: {err:?}");
-        panic!("Failed to write output image");
+        panic!("Failed to write output image: {err:?}");
     });
 
 }

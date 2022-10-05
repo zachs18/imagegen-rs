@@ -18,6 +18,16 @@ pub struct Offset {
     pub dy: i32,
 }
 
+impl std::ops::Add<Offset> for Pixel {
+    type Output = Pixel;
+
+    fn add(mut self, rhs: Offset) -> Self::Output {
+        self.x += rhs.dx;
+        self.y += rhs.dy;
+        self
+    }
+}
+
 // TODO: somehow make fitness function configurable
 
 #[derive(Clone)]
@@ -35,11 +45,18 @@ pub trait Generator: std::fmt::Debug {
 fn place_seeds_common(count: usize, dimx: NonZeroUsize, dimy: NonZeroUsize, data: &mut CommonLockedData, color_generator: &dyn ColorGenerator, rng: &mut dyn RngCore) -> Vec<Pixel> {
     log::trace!("placing {count} seeds");
     let mut placed = Vec::with_capacity(count);
-    for _ in 0..count {
+    let mut failures = 0usize;
+    let mut successes = 0usize;
+    'outer: for _ in 0..count {
         'retry: loop {
             let y = rng.gen_range(0..dimy.get());
             let x = rng.gen_range(0..dimx.get());
             if data.placed_pixels.get((y, x)) {
+                failures += 1;
+                if failures >= 4 {
+                    log::trace!("Failed to place seed 4 times");
+                    break 'outer;
+                }
                 continue 'retry;
             }
 
@@ -49,7 +66,26 @@ fn place_seeds_common(count: usize, dimx: NonZeroUsize, dimy: NonZeroUsize, data
             data.placed_pixels.set((y, x), true);
             placed.push(Pixel { x: x as _, y: y as _ });
 
+            successes += 1;
             break 'retry;
+        }
+    }
+    if successes < count {
+        log::trace!("naive seeding failed {failures} times (it placed {successes} / {count}); using slower always-successful version");
+        let mut all_empty = Vec::with_capacity(dimx.get());
+        log::trace!("{} placed pixels according to bitmap", data.placed_pixels.count());
+        data.placed_pixels.for_each_false(|row, col| {
+            debug_assert!(!data.placed_pixels.get((row, col)));
+            all_empty.push((row, col));
+        });
+        for &(y, x) in all_empty.choose_multiple(rng, count - successes) {
+            log::trace!("placing seed at ({x},{y})");
+
+            data.image[(y, x)] = color_generator.new_color(rng);
+            data.placed_pixels.set((y, x), true);
+            placed.push(Pixel { x: x as _, y: y as _ });
+
+            successes += 1;
         }
     }
     placed
@@ -57,7 +93,7 @@ fn place_seeds_common(count: usize, dimx: NonZeroUsize, dimy: NonZeroUsize, data
 
 /// For inner generation, only one neighbor is considered for fitness.
 /// Edges for inner generators are the actual placed pixels; when an edge is
-/// found to be the "best" for a color, that color is placed adjacent to the edge 
+/// found to be the "best" for a color, that color is placed adjacent to the edge
 /// (and becomes an edge itself)
 #[derive(Debug, Clone)]
 struct InnerGenerator {
@@ -72,14 +108,15 @@ fn validate_inner_edges(dimy: NonZeroUsize, dimx: NonZeroUsize, edges: &mut VecD
     edges.retain(|pixel| {
         placed_pixels.get((pixel.y as usize, pixel.x as usize)) && {
             let mut any_neighbor_open = false;
-            for offset in offsets {
+            'offsets: for offset in offsets {
+                // if let Some(canonical) = geometry.canonicalize(pixel + offset) {...}
                 let y = pixel.y + offset.dy;
-                if y < 0 || y as usize >= dimy.get() { continue; }
+                if y < 0 || y as usize >= dimy.get() { continue 'offsets; }
                 let x = pixel.x + offset.dx;
-                if x < 0 || x as usize >= dimx.get() { continue; }
+                if x < 0 || x as usize >= dimx.get() { continue 'offsets; }
                 if !placed_pixels.get((y as usize, x as usize)) {
                     any_neighbor_open = true;
-                    break;
+                    break 'offsets;
                 }
             }
             any_neighbor_open
@@ -132,7 +169,7 @@ impl Generator for InnerGenerator {
                 let mut best_places = vec![None; self.colorcount.get()];
                 {
                     let mut locked = common_data.locked.write().unwrap();
-                        
+
                     // If there are no edges left, seed again
                     if locked.edges.len() == 0 {
                         log::trace!("re-seeding");
@@ -141,14 +178,15 @@ impl Generator for InnerGenerator {
                         common_data.pixels_placed.fetch_add(seed_locations.len(), Ordering::SeqCst);
                         locked.edges.extend(seed_locations);
                     }
-
-                    log::trace!(target: "barriers", "before progress barrier a");
-                    common_data.progress_barrier.wait();
-                    log::trace!(target: "barriers", "after progress barrier a");
-                    if common_data.finished.load(Ordering::SeqCst) {
-                        break;
-                    }
                 }
+
+                log::trace!(target: "barriers", "before progress barrier a");
+                common_data.progress_barrier.wait();
+                log::trace!(target: "barriers", "after progress barrier a");
+                if common_data.finished.load(Ordering::SeqCst) {
+                    break;
+                }
+
                 let colors = generate_colors(color_generator, rng);
                 common_data.pixels_generated.fetch_add(colors.len(), Ordering::SeqCst);
                 {
@@ -199,6 +237,7 @@ impl Generator for InnerGenerator {
                 }
                 if common_data.pixels_placed.load(Ordering::SeqCst) == common_data.size.get() {
                     common_data.finished.store(true, Ordering::SeqCst);
+                    log::trace!("generator finished");
                 } else {
                     validate_inner_edges(common_data.dimy, common_data.dimx, &mut locked.edges, &mut locked.placed_pixels, &self.offsets);
                 }
@@ -291,7 +330,7 @@ impl Generator for InnerGenerator {
                     let mut best_places = vec![None; self.colorcount.get()];
                     {
                         let mut locked = common_data.locked.write().unwrap();
-                        
+
                         // If there are no edges left, seed again
                         if locked.edges.len() == 0 {
                             log::trace!("re-seeding");
@@ -300,7 +339,8 @@ impl Generator for InnerGenerator {
                             common_data.pixels_placed.fetch_add(seed_locations.len(), Ordering::SeqCst);
                             locked.edges.extend(seed_locations);
                         }
-                        drop(locked);
+                    }
+                    {
                         let locked = common_data.locked.read().unwrap();
 
                         log::trace!(target: "barriers", "before progress barrier a");
@@ -377,6 +417,7 @@ impl Generator for InnerGenerator {
                     }
                     if common_data.pixels_placed.load(Ordering::SeqCst) == common_data.size.get() {
                         common_data.finished.store(true, Ordering::SeqCst);
+                        log::trace!("generator finished");
                     } else {
                         validate_inner_edges(common_data.dimy, common_data.dimx, &mut locked.edges, &mut locked.placed_pixels, &self.offsets);
                     }
