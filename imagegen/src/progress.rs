@@ -4,6 +4,8 @@ use getopt::{Opt, GetoptItem};
 
 use crate::{CommonData, CommonLockedData};
 
+use self::file::FileProgressor;
+
 #[cfg(feature = "sdl2")]
 mod sdl;
 #[cfg(feature = "framebuffer")]
@@ -60,18 +62,23 @@ pub trait Progressor: Send {
             local.run_until(async {
                 let task = tokio::task::spawn_local(fut);
                 loop {
+                    // Wait at the generator barrier first to ensure the generator is done writing
                     log::trace!(target: "barriers", "before progress barrier a");
                     common_data.progress_barrier.wait();
+                    log::trace!(target: "barriers", "mid progress barrier a");
+                    progress_barrier.wait().await;
                     log::trace!(target: "barriers", "after progress barrier a");
 
-                    progress_barrier.wait().await;
                     if common_data.finished.load(Ordering::SeqCst) {
                         // Only read this betwee barriers, so we know generator thread wont change it under us
                         log::trace!("supervisor breaking loop");
                         break;
                     }
-                    progress_barrier.wait().await;
+
+                    // Wait at the progressor barrier first to ensure the progressors are done reading
                     log::trace!(target: "barriers", "before progress barrier b");
+                    progress_barrier.wait().await;
+                    log::trace!(target: "barriers", "mid progress barrier b");
                     common_data.progress_barrier.wait();
                     log::trace!(target: "barriers", "after progress barrier b");
                 }
@@ -127,6 +134,7 @@ impl Progressor for ProgressSupervisor {
             let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
             rt.block_on(async {
                 loop {
+                    // Wait at the generator barrier first to ensure the generator is done writing
                     log::trace!(target: "barriers", "before progress barrier a");
                     common_data.progress_barrier.wait();
                     log::trace!(target: "barriers", "mid progress barrier a");
@@ -135,10 +143,12 @@ impl Progressor for ProgressSupervisor {
                     if common_data.finished.load(Ordering::SeqCst) {
                         break;
                     }
+
+                    // Wait at the progressor barrier first to ensure the progressors are done reading
                     log::trace!(target: "barriers", "before progress barrier b");
-                    common_data.progress_barrier.wait();
-                    log::trace!(target: "barriers", "mid progress barrier b");
                     progress_barrier.wait().await;
+                    log::trace!(target: "barriers", "mid progress barrier b");
+                    common_data.progress_barrier.wait();
                     log::trace!(target: "barriers", "after progress barrier b");
                 }
                 log::trace!("supervisor exiting");
@@ -183,7 +193,8 @@ pub fn handle_opts(opts: &[GetoptItem]) -> (Box<dyn Progressor + Send>, Progress
     for opt in opts {
         match opt {
             GetoptItem::Opt { opt, arg: Some(filename) } if opt.long.as_deref() == Some("progressfile") => {
-                todo!("open filename and make progress::file::FileProgressor")
+                let file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(*filename).unwrap();
+                progressors.push(Box::new(FileProgressor::new(file)));
             },
             GetoptItem::Opt { opt, arg: None } if opt.long.as_deref() == Some("defaultprogressfile") => {
                 todo!("open the default filename and make progress::file::FileProgressor")
