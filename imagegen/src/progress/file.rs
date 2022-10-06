@@ -1,6 +1,6 @@
 use std::{io::{Write, BufWriter}, sync::{Arc, Mutex, atomic::Ordering}, pin::Pin};
 
-use super::Progressor;
+use super::{Progressor, ProgressData, ProgressSupervisorData};
 
 pub struct FileProgressor<W: Write> {
     writer: Arc<Mutex<BufWriter<W>>>,
@@ -21,22 +21,43 @@ impl<W: Write + Send + 'static> Progressor for FileProgressor<W> {
 
         Box::new(move |progress_data, common_data| {
             Box::pin(async move {
+                let ProgressData { progress_interval, progress_count } = progress_data;
+                let ProgressSupervisorData {
+                    locked,
+                    ref progress_barrier,
+                    finished,
+                    ..
+                } = *common_data;
                 let mut writer = writer.lock().unwrap();
+                let mut step_count = 0;
                 loop {
                     log::trace!(target: "barriers", "before progress barrier a");
-                    common_data.progress_barrier.wait().await;
+                    progress_barrier.wait().await;
                     log::trace!(target: "barriers", "after progress barrier a");
 
-                    let locked = common_data.locked.read().unwrap();
-                    locked.image.write_to(&mut *writer).unwrap();
-                    writer.flush().unwrap();
+                    if step_count >= progress_interval {
+                        step_count = 0;
+                        let locked = locked.read().unwrap();
+                        locked.image.write_to(&mut *writer).unwrap();
+                        writer.flush().unwrap();
+                    } else {
+                        step_count += 1;
+                    }
 
-                    if common_data.finished.load(Ordering::SeqCst) {
+                    if finished.load(Ordering::SeqCst) {
                         break;
                     }
                     log::trace!(target: "barriers", "before progress barrier b");
-                    common_data.progress_barrier.wait().await;
+                    progress_barrier.wait().await;
                     log::trace!(target: "barriers", "after progress barrier b");
+                }
+                let locked = locked.read().unwrap();
+                locked.image.write_to(&mut *writer).unwrap();
+                writer.flush().unwrap();
+                let mut data = vec![];
+                locked.image.write_to(&mut data).unwrap();
+                for _ in 0..progress_count {
+                    writer.write_all(&data).unwrap();
                 }
             })
         })

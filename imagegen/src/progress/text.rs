@@ -18,16 +18,16 @@ impl<F: for<'a> Fn(std::fmt::Arguments<'a>) + Sync + Send + ?Sized + 'static> Pr
             let callback = self.callback.clone();
             move |progress_data, common_data| {
                 Box::pin(async move {
-                    let ProgressData { progress_interval, } = progress_data;
+                    let ProgressData { progress_interval, .. } = progress_data;
                     let ProgressSupervisorData {
                         locked,
-                        progress_barrier,
+                        ref progress_barrier,
                         finished,
                         pixels_placed,
                         pixels_generated,
                         size,
                         ..
-                    } = &*common_data;
+                    } = *common_data;
                     let mut step_count = 0;
                     let mut prev_edge_count = 0;
                     loop {

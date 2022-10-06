@@ -93,7 +93,7 @@ fn main() {
     let mut generator = generate::handle_opts(&opts);
     let color_generator = color::handle_opts(&opts);
     log::trace!("color_generator: {:?}", color_generator);
-    let (mut progressor, progress_data) = progress::handle_opts(&opts);
+    let (progressor, progress_data) = progress::handle_opts(&opts);
     let geometry = geometry::handle_opts(&opts, &common_data);
     // TODO: put geometry in common_data, maybe by having setup::handle_opts cann geometry::handle_opts
 

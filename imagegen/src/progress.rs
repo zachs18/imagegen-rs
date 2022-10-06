@@ -16,6 +16,7 @@ mod file;
 #[derive(Clone)]
 pub struct ProgressData {
     pub progress_interval: usize,
+    pub progress_count: usize,
 }
 
 /// CommonData, but with its own progress_barrier.
@@ -179,6 +180,7 @@ pub fn opts() -> impl IntoIterator<Item = Opt> {
         Opt::short_long('d', "defaultprogressfile", getopt::HasArgument::No),
         Opt::short_long('T', "progresstext", getopt::HasArgument::No),
         Opt::short_long('I', "progressinterval", getopt::HasArgument::Yes),
+        Opt::short_long('M', "progresscount", getopt::HasArgument::Yes),
         #[cfg(feature = "sdl2")]
         Opt::long("SDL", getopt::HasArgument::No),
         Opt::long("wait", getopt::HasArgument::Yes),
@@ -190,6 +192,7 @@ pub fn opts() -> impl IntoIterator<Item = Opt> {
 pub fn handle_opts(opts: &[GetoptItem]) -> (Box<dyn Progressor + Send>, ProgressData)  {
     let mut progressors: Vec<Box<dyn Progressor + Send>> = vec![];
     let mut progress_interval = None;
+    let mut progress_count = None;
     for opt in opts {
         match opt {
             GetoptItem::Opt { opt, arg: Some(filename) } if opt.long.as_deref() == Some("progressfile") => {
@@ -206,6 +209,9 @@ pub fn handle_opts(opts: &[GetoptItem]) -> (Box<dyn Progressor + Send>, Progress
             },
             GetoptItem::Opt { opt, arg: Some(progress_interval_str) } if opt.long.as_deref() == Some("progressinterval") => {
                 progress_interval = Some(progress_interval_str.parse().unwrap());
+            },
+            GetoptItem::Opt { opt, arg: Some(progress_count_str) } if opt.long.as_deref() == Some("progresscount") => {
+                progress_count = Some(progress_count_str.parse().unwrap());
             },
             #[cfg(feature = "sdl2")]
             GetoptItem::Opt { opt, arg: None } if opt.long.as_deref() == Some("SDL") => {
@@ -233,6 +239,7 @@ pub fn handle_opts(opts: &[GetoptItem]) -> (Box<dyn Progressor + Send>, Progress
 
     let data = ProgressData {
         progress_interval: progress_interval.unwrap_or(1024),
+        progress_count: progress_count.unwrap_or(1),
     };
 
     let progressor = if progressors.len() == 0 {
