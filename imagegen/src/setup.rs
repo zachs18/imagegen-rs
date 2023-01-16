@@ -1,10 +1,14 @@
-use std::{sync::{Barrier, RwLock, Arc}, collections::VecDeque, num::NonZeroUsize};
+use std::{
+    collections::VecDeque,
+    num::NonZeroUsize,
+    sync::{Arc, Barrier, RwLock},
+};
 
 use bitmap::BitMap;
-use getopt::{Opt, GetoptItem};
+use getopt::{GetoptItem, Opt};
 use rand::{RngCore, SeedableRng};
 
-use crate::{pnmdata::PnmData, CommonData, color::Color, CommonLockedData};
+use crate::{color::Color, pnmdata::PnmData, CommonData, CommonLockedData};
 
 pub fn opts() -> impl IntoIterator<Item = Opt> {
     [
@@ -28,37 +32,58 @@ pub fn handle_opts(opts: &[GetoptItem]) -> (Arc<CommonData>, impl RngCore + Send
                 None => match $arg.parse() {
                     Ok(value) => $e = Some(value),
                     Err(_) => panic!("invalid {} value: {:?}", $field, $arg),
-                }
+                },
             }
         };
     }
 
     for opt in opts {
         match opt {
-            GetoptItem::Opt { opt, arg: Some(width) } if opt.long.as_deref() == Some("x") => {
+            GetoptItem::Opt {
+                opt,
+                arg: Some(width),
+            } if opt.long.as_deref() == Some("x") => {
                 set!(width => size.0 => "width");
-            },
-            GetoptItem::Opt { opt, arg: Some(height) } if opt.long.as_deref() == Some("y") => {
+            }
+            GetoptItem::Opt {
+                opt,
+                arg: Some(height),
+            } if opt.long.as_deref() == Some("y") => {
                 set!(height => size.1 => "height");
-            },
-            GetoptItem::Opt { opt, arg: Some(size_str) } if opt.long.as_deref() == Some("size") => {
-                let (width, height) = size_str.split_once(',').or_else(|| size_str.split_once('x')).expect("invalid size");
+            }
+            GetoptItem::Opt {
+                opt,
+                arg: Some(size_str),
+            } if opt.long.as_deref() == Some("size") => {
+                let (width, height) = size_str
+                    .split_once(',')
+                    .or_else(|| size_str.split_once('x'))
+                    .expect("invalid size");
                 set!(width => size.0 => "width");
                 set!(height => size.1 => "height");
-            },
-            GetoptItem::Opt { opt, arg: Some(maxval_str) } if opt.long.as_deref() == Some("maxval") => {
+            }
+            GetoptItem::Opt {
+                opt,
+                arg: Some(maxval_str),
+            } if opt.long.as_deref() == Some("maxval") => {
                 set!(maxval_str => maxval => "maxval");
-            },
-            GetoptItem::Opt { opt, arg: Some(seed_str) } if opt.long.as_deref() == Some("seed") => {
+            }
+            GetoptItem::Opt {
+                opt,
+                arg: Some(seed_str),
+            } if opt.long.as_deref() == Some("seed") => {
                 set!(seed_str => seed => "seed");
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
 
     const DEFAULT_SIZE: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(256) };
 
-    let (dimx, dimy) = (size.0.unwrap_or(DEFAULT_SIZE), size.1.unwrap_or(DEFAULT_SIZE));
+    let (dimx, dimy) = (
+        size.0.unwrap_or(DEFAULT_SIZE),
+        size.1.unwrap_or(DEFAULT_SIZE),
+    );
     let maxval = maxval.unwrap_or(255);
     let size = NonZeroUsize::new(dimx.get().checked_mul(dimy.get()).unwrap()).unwrap();
 

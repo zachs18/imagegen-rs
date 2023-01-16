@@ -1,6 +1,9 @@
-use std::{path::PathBuf, os::fd::AsRawFd, mem::MaybeUninit, pin::Pin, fs::File, sync::atomic::Ordering, io::Error, simd::simd_swizzle};
+use std::{
+    fs::File, io::Error, mem::MaybeUninit, os::fd::AsRawFd, path::PathBuf, pin::Pin,
+    simd::simd_swizzle, sync::atomic::Ordering,
+};
 
-use crate::{progress::NoOpProgressor, color::Color};
+use crate::{color::Color, progress::NoOpProgressor};
 
 use super::Progressor;
 
@@ -24,7 +27,9 @@ impl std::ops::Index<usize> for MmappedFramebuffer {
     type Output = [[u8; 4]];
 
     fn index(&self, index: usize) -> &Self::Output {
-        if index >= self.height { panic!("index out of bounds"); }
+        if index >= self.height {
+            panic!("index out of bounds");
+        }
         unsafe {
             std::slice::from_raw_parts(
                 self.ptr.cast::<u8>().add(index * self.stride).cast(),
@@ -36,7 +41,9 @@ impl std::ops::Index<usize> for MmappedFramebuffer {
 
 impl std::ops::IndexMut<usize> for MmappedFramebuffer {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        if index >= self.height { panic!("index out of bounds"); }
+        if index >= self.height {
+            panic!("index out of bounds");
+        }
         unsafe {
             std::slice::from_raw_parts_mut(
                 self.ptr.cast::<u8>().add(index * self.stride).cast(),
@@ -57,15 +64,23 @@ impl Drop for MmappedFramebuffer {
 }
 
 impl Progressor for FramebufferProgressor {
-    fn make_supervised_progressor(&self) -> Box<dyn Send + for<'a> FnOnce(super::ProgressData, &'a super::ProgressSupervisorData<'a>) -> Pin<Box<dyn std::future::Future<Output = ()> + 'a>>> {
-        let mut noop_fallback = NoOpProgressor;
+    fn make_supervised_progressor(
+        &self,
+    ) -> Box<
+        dyn Send
+            + for<'a> FnOnce(
+                super::ProgressData,
+                &'a super::ProgressSupervisorData<'a>,
+            ) -> Pin<Box<dyn std::future::Future<Output = ()> + 'a>>,
+    > {
+        let noop_fallback = NoOpProgressor;
 
         let fb = match File::options().write(true).read(true).open(&self.fb_path) {
             Ok(fb) => fb,
             Err(err) => {
                 log::error!("Failed to open framebuffer {:?}: {}", self.fb_path, err);
                 return noop_fallback.make_supervised_progressor();
-            },
+            }
         };
 
         let fbfd = fb.as_raw_fd();
@@ -129,11 +144,19 @@ impl Progressor for FramebufferProgressor {
             let fb_path = self.fb_path.clone();
             move |progress_data, common_data| {
                 if common_data.dimx.get() > framebuffer.width {
-                    log::error!("Image too wide for framebuffer {fb_path:?} ({} > {}).", common_data.dimx, vinfo.xres_virtual);
+                    log::error!(
+                        "Image too wide for framebuffer {fb_path:?} ({} > {}).",
+                        common_data.dimx,
+                        vinfo.xres_virtual
+                    );
                     return noop_fallback.make_supervised_progressor()(progress_data, common_data);
                 }
                 if common_data.dimy.get() > framebuffer.height {
-                    log::error!("Image too tall for framebuffer {fb_path:?} ({} > {}).", common_data.dimy, vinfo.yres_virtual);
+                    log::error!(
+                        "Image too tall for framebuffer {fb_path:?} ({} > {}).",
+                        common_data.dimy,
+                        vinfo.yres_virtual
+                    );
                     return noop_fallback.make_supervised_progressor()(progress_data, common_data);
                 }
 
@@ -147,14 +170,17 @@ impl Progressor for FramebufferProgressor {
                         common_data.progress_barrier.wait().await;
                         log::trace!(target: "barriers", "after progress barrier a");
                         let now = Instant::now();
-                        if now - last_update >= update_interval || common_data.finished.load(Ordering::SeqCst) {
+                        if now - last_update >= update_interval
+                            || common_data.finished.load(Ordering::SeqCst)
+                        {
                             last_update = now;
                             let locked = common_data.locked.read().unwrap();
                             for y in 0..common_data.dimy.get() {
                                 for x in 0..common_data.dimx.get() {
                                     let color = locked.image[(y, x)] * Color::splat(255.0);
                                     // framebuffer[y][x] = *color.cast().as_array();
-                                    framebuffer[y][x] = simd_swizzle!(color.cast(), [2,1,0,3]).to_array();
+                                    framebuffer[y][x] =
+                                        simd_swizzle!(color.cast(), [2, 1, 0, 3]).to_array();
                                 }
                             }
                         }

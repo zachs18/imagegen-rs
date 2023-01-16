@@ -1,4 +1,4 @@
-use crate::color::{Color, Channel};
+use crate::color::{Channel, Color};
 
 pub struct PnmData {
     pub dimx: u32,
@@ -18,7 +18,6 @@ impl std::ops::Index<(usize, usize)> for PnmData {
         &self.rawdata[idx]
     }
 }
-
 
 impl std::ops::IndexMut<(usize, usize)> for PnmData {
     fn index_mut(&mut self, (y, x): (usize, usize)) -> &mut Self::Output {

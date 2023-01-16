@@ -1,13 +1,20 @@
 #![feature(portable_simd)]
 
-use std::{sync::{Arc, RwLock, Barrier, atomic::{AtomicBool, AtomicUsize}}, collections::VecDeque, num::NonZeroUsize};
+use std::{
+    collections::VecDeque,
+    num::NonZeroUsize,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize},
+        Arc, Barrier, RwLock,
+    },
+};
 
-mod setup;
 mod color;
 mod generate;
-mod progress;
-mod pnmdata;
 mod geometry;
+mod pnmdata;
+mod progress;
+mod setup;
 
 use bitmap::BitMap;
 use generate::Pixel;
@@ -49,45 +56,49 @@ macro_rules! chain {
 }
 
 fn main() {
-    env_logger::builder().format(|f, record| {
-        use std::io::Write;
-        let tid = std::thread::current().id();
-        let color = match record.level() {
-            log::Level::Error => "31;1",
-            log::Level::Warn => "33;1",
-            log::Level::Info => "32;1",
-            log::Level::Debug => "34;1",
-            log::Level::Trace => "35;1",
-        };
-        writeln!(
-            f,
-            "\x1b[{}m{}\x1b[0m {} {:?} [{}:{}]: {}",
-            color,
-            record.level(),
-            record.target(),
-            tid,
-            record.file().unwrap_or("<unknown>"),
-            match record.line() {
-                Some(line) => format!("{}", line),
-                None => "<unknown>".to_owned(),
-            },
-            record.args(),
-        )
-    }).init();
+    env_logger::builder()
+        .format(|f, record| {
+            use std::io::Write;
+            let tid = std::thread::current().id();
+            let color = match record.level() {
+                log::Level::Error => "31;1",
+                log::Level::Warn => "33;1",
+                log::Level::Info => "32;1",
+                log::Level::Debug => "34;1",
+                log::Level::Trace => "35;1",
+            };
+            writeln!(
+                f,
+                "\x1b[{}m{}\x1b[0m {} {:?} [{}:{}]: {}",
+                color,
+                record.level(),
+                record.target(),
+                tid,
+                record.file().unwrap_or("<unknown>"),
+                match record.line() {
+                    Some(line) => format!("{}", line),
+                    None => "<unknown>".to_owned(),
+                },
+                record.args(),
+            )
+        })
+        .init();
 
     let args = std::env::args().skip(1).collect::<Vec<_>>();
 
-    let getopt = Getopt::from_iter(
-        chain!(
-            setup::opts(),
-            geometry::opts(),
-            generate::opts(),
-            color::opts(),
-            progress::opts(),
-        )
-    ).unwrap();
+    let getopt = Getopt::from_iter(chain!(
+        setup::opts(),
+        geometry::opts(),
+        generate::opts(),
+        color::opts(),
+        progress::opts(),
+    ))
+    .unwrap();
 
-    let opts = getopt.parse(args.iter().map(|x| &**x)).collect::<Result<Vec<_>, _>>().unwrap();
+    let opts = getopt
+        .parse(args.iter().map(|x| &**x))
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
 
     let (mut common_data, mut rng) = setup::handle_opts(&opts);
     let mut generator = generate::handle_opts(&opts);
@@ -100,8 +111,7 @@ fn main() {
     let _gen_thread = std::thread::spawn({
         let common_data = common_data.clone();
         move || {
-            let data = GeneratorData {
-            };
+            let data = GeneratorData {};
             generator.generate(data, common_data, &*color_generator, &mut rng);
         }
     });
@@ -116,11 +126,17 @@ fn main() {
     _gen_thread.join().unwrap();
     _prog_thread.join().unwrap();
 
-    let locked = Arc::get_mut(&mut common_data).expect("all other threads have exited").locked.get_mut().unwrap();
+    let locked = Arc::get_mut(&mut common_data)
+        .expect("all other threads have exited")
+        .locked
+        .get_mut()
+        .unwrap();
     // TODO: output file
-    locked.image.write_to(&mut std::io::stdout().lock()).unwrap_or_else(|err| {
-        // TODO: better error handling (everywhere)
-        panic!("Failed to write output image: {err:?}");
-    });
-
+    locked
+        .image
+        .write_to(&mut std::io::stdout().lock())
+        .unwrap_or_else(|err| {
+            // TODO: better error handling (everywhere)
+            panic!("Failed to write output image: {err:?}");
+        });
 }

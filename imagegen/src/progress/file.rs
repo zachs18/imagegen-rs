@@ -1,8 +1,13 @@
-use std::{io::{Write, BufWriter}, sync::{Arc, Mutex, atomic::Ordering}, pin::Pin};
+use std::{
+    io::{BufWriter, Write},
+    pin::Pin,
+    sync::{atomic::Ordering, Arc, Mutex},
+};
 
-use super::{Progressor, ProgressData, ProgressSupervisorData};
+use super::{ProgressData, ProgressSupervisorData, Progressor};
 
 pub struct FileProgressor<W: Write> {
+    /// TODO: use tokio AsyncWrite
     writer: Arc<Mutex<BufWriter<W>>>,
 }
 
@@ -14,14 +19,24 @@ impl<W: Write> FileProgressor<W> {
     }
 }
 
-
 impl<W: Write + Send + 'static> Progressor for FileProgressor<W> {
-    fn make_supervised_progressor(&self) -> Box<dyn Send + for<'a> FnOnce(super::ProgressData, &'a super::ProgressSupervisorData<'a>) -> Pin<Box<dyn std::future::Future<Output = ()> + 'a>>> {
+    fn make_supervised_progressor(
+        &self,
+    ) -> Box<
+        dyn Send
+            + for<'a> FnOnce(
+                super::ProgressData,
+                &'a super::ProgressSupervisorData<'a>,
+            ) -> Pin<Box<dyn std::future::Future<Output = ()> + 'a>>,
+    > {
         let writer = self.writer.clone();
 
         Box::new(move |progress_data, common_data| {
             Box::pin(async move {
-                let ProgressData { progress_interval, progress_count } = progress_data;
+                let ProgressData {
+                    progress_interval,
+                    progress_count,
+                } = progress_data;
                 let ProgressSupervisorData {
                     locked,
                     ref progress_barrier,

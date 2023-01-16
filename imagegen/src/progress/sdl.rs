@@ -1,11 +1,15 @@
-use std::{pin::Pin, sync::atomic::Ordering, marker::PhantomData, ops::{Index, IndexMut}};
+use std::{
+    marker::PhantomData,
+    ops::{Index, IndexMut},
+    pin::Pin,
+    sync::atomic::Ordering,
+};
 
-use crate::{progress::NoOpProgressor, color::Color};
+use crate::{color::Color, progress::NoOpProgressor};
 
 use super::Progressor;
 
-pub struct Sdl2Progressor {
-}
+pub struct Sdl2Progressor {}
 
 struct SdlSurfacePixelsMut<'a> {
     data: *mut u8,
@@ -16,7 +20,12 @@ struct SdlSurfacePixelsMut<'a> {
 }
 
 impl<'a> SdlSurfacePixelsMut<'a> {
-    pub unsafe fn new_unchecked(data: &'a mut [u8], byte_stride: usize, width: usize, height: usize) -> Self {
+    pub unsafe fn new_unchecked(
+        data: &'a mut [u8],
+        byte_stride: usize,
+        width: usize,
+        height: usize,
+    ) -> Self {
         Self {
             data: data.as_mut_ptr(),
             byte_stride,
@@ -31,31 +40,38 @@ impl<'a> Index<(usize, usize)> for SdlSurfacePixelsMut<'a> {
     type Output = [u8; 4];
 
     fn index(&self, (row, col): (usize, usize)) -> &Self::Output {
-        if row >= self.height || col >= self.width { panic!("index out of bounds"); }
-        let byte_idx = col * 4 + row * self.byte_stride;
-        unsafe {
-            &*(self.data.wrapping_add(byte_idx).cast() as *const [u8; 4])
+        if row >= self.height || col >= self.width {
+            panic!("index out of bounds");
         }
+        let byte_idx = col * 4 + row * self.byte_stride;
+        unsafe { &*(self.data.wrapping_add(byte_idx).cast() as *const [u8; 4]) }
     }
 }
 
 impl<'a> IndexMut<(usize, usize)> for SdlSurfacePixelsMut<'a> {
     fn index_mut(&mut self, (row, col): (usize, usize)) -> &mut Self::Output {
-        if row >= self.height || col >= self.width { panic!("index out of bounds"); }
-        let byte_idx = col * 4 + row * self.byte_stride;
-        unsafe {
-            &mut *self.data.wrapping_add(byte_idx).cast()
+        if row >= self.height || col >= self.width {
+            panic!("index out of bounds");
         }
+        let byte_idx = col * 4 + row * self.byte_stride;
+        unsafe { &mut *self.data.wrapping_add(byte_idx).cast() }
     }
 }
 
-
 impl Progressor for Sdl2Progressor {
-    fn make_supervised_progressor(&self) -> Box<dyn Send + for<'a> FnOnce(super::ProgressData, &'a super::ProgressSupervisorData<'a>) -> Pin<Box<dyn std::future::Future<Output = ()> + 'a>>> {
+    fn make_supervised_progressor(
+        &self,
+    ) -> Box<
+        dyn Send
+            + for<'a> FnOnce(
+                super::ProgressData,
+                &'a super::ProgressSupervisorData<'a>,
+            ) -> Pin<Box<dyn std::future::Future<Output = ()> + 'a>>,
+    > {
         Box::new({
             move |progress_data, common_data| {
                 let fut = async move {
-                    let mut noop_fallback = NoOpProgressor;
+                    let noop_fallback = NoOpProgressor;
                     // return noop_fallback.run_under_supervisor(data, common_data);
 
                     log::trace!(target: "sdl", "initializing sdl on thread {:?}", std::thread::current());
@@ -63,35 +79,56 @@ impl Progressor for Sdl2Progressor {
                         Ok(ctx) => ctx,
                         Err(error) => {
                             log::error!("Failed to initialize SDL2: {error}");
-                            return noop_fallback.make_supervised_progressor()(progress_data, common_data).await;
-                        },
+                            return noop_fallback.make_supervised_progressor()(
+                                progress_data,
+                                common_data,
+                            )
+                            .await;
+                        }
                     };
 
                     let mut events = match sdl_context.event_pump() {
                         Ok(events) => events,
                         Err(error) => {
                             log::error!("Failed to initialize SDL2 events: {error}");
-                            return noop_fallback.make_supervised_progressor()(progress_data, common_data).await;
-                        },
+                            return noop_fallback.make_supervised_progressor()(
+                                progress_data,
+                                common_data,
+                            )
+                            .await;
+                        }
                     };
 
                     let video_subsystem = match sdl_context.video() {
                         Ok(subsystem) => subsystem,
                         Err(error) => {
                             log::error!("Failed to initialize SDL2 video subsystem: {error}");
-                            return noop_fallback.make_supervised_progressor()(progress_data, common_data).await;
-                        },
+                            return noop_fallback.make_supervised_progressor()(
+                                progress_data,
+                                common_data,
+                            )
+                            .await;
+                        }
                     };
 
-                    let window = match video_subsystem.window("imagegen-rs", common_data.dimx.get().try_into().unwrap(), common_data.dimy.get().try_into().unwrap())
+                    let window = match video_subsystem
+                        .window(
+                            "imagegen-rs",
+                            common_data.dimx.get().try_into().unwrap(),
+                            common_data.dimy.get().try_into().unwrap(),
+                        )
                         .position_centered()
                         .build()
                     {
                         Ok(window) => window,
                         Err(error) => {
                             log::error!("Failed to initialize SDL2 window: {error}");
-                            return noop_fallback.make_supervised_progressor()(progress_data, common_data).await;
-                        },
+                            return noop_fallback.make_supervised_progressor()(
+                                progress_data,
+                                common_data,
+                            )
+                            .await;
+                        }
                     };
 
                     // let mut canvas = match window.into_canvas().build() {
@@ -120,26 +157,28 @@ impl Progressor for Sdl2Progressor {
                         while let Some(ev) = events.poll_event() {
                             log::trace!(target: "sdl", "sdl event {:?} aaa 2", ev);
                             match ev {
-                                sdl2::event::Event::Quit { timestamp }
-                                | sdl2::event::Event::AppTerminating { timestamp } => {
+                                sdl2::event::Event::Quit { .. }
+                                | sdl2::event::Event::AppTerminating { .. } => {
                                     log::trace!(target: "sdl", "inside sdl loop on thread {:?} aaa 2", std::thread::current().id());
                                     quit_requested = true;
-                                },
-                                sdl2::event::Event::KeyDown { timestamp, window_id, keycode, scancode, keymod, repeat }
-                                | sdl2::event::Event::KeyUp { timestamp, window_id, keycode, scancode, keymod, repeat } => {
+                                }
+                                sdl2::event::Event::KeyDown { keycode, .. }
+                                | sdl2::event::Event::KeyUp { keycode, .. } => {
                                     log::trace!(target: "sdl", "inside sdl loop on thread {:?} aaa 2", std::thread::current().id());
                                     if keycode == Some(sdl2::keyboard::Keycode::Escape) {
                                         quit_requested = true;
                                     }
-                                },
-                                _ => {},
+                                }
+                                _ => {}
                             }
                         }
                         log::trace!(target: "sdl", "inside sdl loop on thread {:?} aaa bbb", std::thread::current().id());
 
-
                         let now = Instant::now();
-                        if true || now - last_update >= update_interval || common_data.finished.load(Ordering::SeqCst) {
+                        if true
+                            || now - last_update >= update_interval
+                            || common_data.finished.load(Ordering::SeqCst)
+                        {
                             log::trace!(target: "sdl", "inside sdl loop on thread {:?} aaa bbb", std::thread::current().id());
                             last_update = now;
                             let locked = common_data.locked.read().unwrap();
@@ -158,36 +197,44 @@ impl Progressor for Sdl2Progressor {
                                 Ok(surface) => surface,
                                 Err(error) => {
                                     panic!("Failed to initialize SDL2 window surface: {error}");
-                                },
+                                }
                             };
 
                             let byte_stride = surface.pitch() as usize;
                             let width = surface.width() as usize;
                             let height = surface.height() as usize;
                             surface.with_lock_mut(|data| {
-                                let mut data = unsafe { SdlSurfacePixelsMut::new_unchecked(data, byte_stride, width, height) };
+                                let mut data = unsafe {
+                                    SdlSurfacePixelsMut::new_unchecked(
+                                        data,
+                                        byte_stride,
+                                        width,
+                                        height,
+                                    )
+                                };
+                                log::debug!("sdl placing pixels");
                                 locked.placed_pixels.for_each_true(|row, col| {
-                                    log::trace!("sdl placing pixel ({row},{col})");
                                     let color = locked.image[(row, col)] * Color::splat(255.0);
                                     let color = color.cast::<u8>();
                                     // let color = u32::from_ne_bytes(color.to_array());
                                     // canvas.pixel(col as _, row as _, color).unwrap();
                                     data[(row, col)] = color.to_array();
-                                    log::trace!("sdl placed pixel ({row},{col})");
                                 });
+                                log::debug!("sdl placed pixels");
                             });
                             surface.finish().unwrap();
                             log::debug!("Wrote image sdl");
                         }
                         log::trace!(target: "sdl", "inside sdl loop on thread {:?} aaa bbb", std::thread::current().id());
                         if common_data.finished.load(Ordering::SeqCst) {
-                            log::debug!("sdl broke out of loop");
+                            log::debug!("sdl breaking out of loop");
                             break;
                         }
                         log::trace!(target: "barriers", "sdl before barrier b");
                         common_data.progress_barrier.wait().await;
                         log::trace!(target: "barriers", "sdl after barrier b");
                         if quit_requested {
+                            log::trace!("sdl quit requested");
                             common_data.finished.store(true, Ordering::SeqCst);
                         }
                     }

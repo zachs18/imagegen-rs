@@ -1,6 +1,6 @@
-use std::{sync::Arc, num::NonZeroUsize};
+use std::{num::NonZeroUsize, sync::Arc};
 
-use getopt::{Opt, GetoptItem};
+use getopt::{GetoptItem, Opt};
 
 use crate::{generate::Pixel, CommonData};
 
@@ -68,7 +68,10 @@ pub fn opts() -> impl IntoIterator<Item = Opt> {
     ]
 }
 
-pub fn handle_opts(opts: &[GetoptItem], common_data: &CommonData) -> Arc<dyn Geometry + Send + Sync> {
+pub fn handle_opts(
+    opts: &[GetoptItem],
+    common_data: &CommonData,
+) -> Arc<dyn Geometry + Send + Sync> {
     // let mut size = (None, None);
     // let mut maxval = None;
     // let mut seed = None;

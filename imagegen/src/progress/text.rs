@@ -1,6 +1,10 @@
-use std::{sync::{atomic::Ordering, Arc}, future::Future, pin::Pin};
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::{atomic::Ordering, Arc},
+};
 
-use super::{Progressor, ProgressData, ProgressSupervisorData};
+use super::{ProgressData, ProgressSupervisorData, Progressor};
 
 pub struct TextProgressor<F: for<'a> FnMut(std::fmt::Arguments<'a>) + ?Sized> {
     callback: Arc<F>,
@@ -8,17 +12,31 @@ pub struct TextProgressor<F: for<'a> FnMut(std::fmt::Arguments<'a>) + ?Sized> {
 
 impl<F: for<'a> Fn(std::fmt::Arguments<'a>)> TextProgressor<F> {
     pub fn new(callback: F) -> Self {
-        Self { callback: Arc::new(callback) }
+        Self {
+            callback: Arc::new(callback),
+        }
     }
 }
 
-impl<F: for<'a> Fn(std::fmt::Arguments<'a>) + Sync + Send + ?Sized + 'static> Progressor for TextProgressor<F> {
-    fn make_supervised_progressor(&self) -> Box<dyn Send + for<'a> FnOnce(ProgressData, &'a ProgressSupervisorData<'a>) -> Pin<Box<dyn Future<Output = ()> + 'a>>> {
+impl<F: for<'a> Fn(std::fmt::Arguments<'a>) + Sync + Send + ?Sized + 'static> Progressor
+    for TextProgressor<F>
+{
+    fn make_supervised_progressor(
+        &self,
+    ) -> Box<
+        dyn Send
+            + for<'a> FnOnce(
+                ProgressData,
+                &'a ProgressSupervisorData<'a>,
+            ) -> Pin<Box<dyn Future<Output = ()> + 'a>>,
+    > {
         Box::new({
             let callback = self.callback.clone();
             move |progress_data, common_data| {
                 Box::pin(async move {
-                    let ProgressData { progress_interval, .. } = progress_data;
+                    let ProgressData {
+                        progress_interval, ..
+                    } = progress_data;
                     let ProgressSupervisorData {
                         locked,
                         ref progress_barrier,
