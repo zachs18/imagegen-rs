@@ -1,6 +1,6 @@
-use std::{simd::Simd, borrow::Cow, num::NonZeroUsize};
-use getopt::{Opt, GetoptItem};
+use getopt::{GetoptItem, Opt};
 use rand::{Rng, RngCore};
+use std::{borrow::Cow, num::NonZeroUsize, simd::Simd};
 
 #[cfg(feature = "f32")]
 pub type Channel = f32;
@@ -37,12 +37,6 @@ pub struct VectorSet {
     kind: VectorSetKind,
 }
 
-impl Default for VectorSet {
-    fn default() -> Self {
-        Self { start: Default::default(), vectors: Default::default(), chance: ONE, kind: Default::default() }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct VectorSetGroup {
     // Must never be empty
@@ -51,17 +45,14 @@ pub struct VectorSetGroup {
     total_chance: NonZeroUsize,
 }
 
-impl Default for VectorSetGroup {
-    fn default() -> Self {
-        Self { vectorsets: vec![VectorSet::default()].into(), total_chance: ONE }
-    }
-}
-
 impl VectorSetGroup {
     pub fn new(vectorsets: Cow<'static, [VectorSet]>) -> Result<Self, Cow<'static, [VectorSet]>> {
         let total_chance = vectorsets.iter().map(|vs| vs.chance.get()).sum();
-        if total_chance > 0 {
-            Ok(Self { vectorsets, total_chance: NonZeroUsize::new(total_chance).unwrap() })
+        if let Some(total_chance) = NonZeroUsize::new(total_chance) {
+            Ok(Self {
+                vectorsets,
+                total_chance,
+            })
         } else {
             Err(vectorsets)
         }
@@ -74,11 +65,15 @@ pub trait ColorGenerator: std::fmt::Debug {
 
     #[doc(hidden)]
     #[cfg(test)]
-    fn as_vectorset(&self) -> Option<&VectorSet> { None }
+    fn as_vectorset(&self) -> Option<&VectorSet> {
+        None
+    }
 
     #[doc(hidden)]
     #[cfg(test)]
-    fn as_vectorsetgroup(&self) -> Option<&VectorSetGroup> { None }
+    fn as_vectorsetgroup(&self) -> Option<&VectorSetGroup> {
+        None
+    }
 }
 
 impl<'a, G: ColorGenerator + ?Sized> ColorGenerator for &'a G {
@@ -88,11 +83,15 @@ impl<'a, G: ColorGenerator + ?Sized> ColorGenerator for &'a G {
 
     #[doc(hidden)]
     #[cfg(test)]
-    fn as_vectorset(&self) -> Option<&VectorSet> { (**self).as_vectorset() }
+    fn as_vectorset(&self) -> Option<&VectorSet> {
+        (**self).as_vectorset()
+    }
 
     #[doc(hidden)]
     #[cfg(test)]
-    fn as_vectorsetgroup(&self) -> Option<&VectorSetGroup> { (**self).as_vectorsetgroup() }
+    fn as_vectorsetgroup(&self) -> Option<&VectorSetGroup> {
+        (**self).as_vectorsetgroup()
+    }
 }
 
 static BASIC_COLOR: VectorSet = VectorSet {
@@ -152,12 +151,12 @@ impl ColorGenerator for VectorSet {
             // Each vector multiplier is generated independently.
             VectorSetKind::Full => {
                 for vector in &*self.vectors {
-                    let multplier: Channel = rng.gen_range(0.0 ..= 1.0);
+                    let multplier: Channel = rng.gen_range(0.0..=1.0);
                     c += *vector * Color::splat(multplier);
                 }
                 log::trace!("generated {c:?}");
                 c
-            },
+            }
             // The sum of the vector multipliers is not more than one.
             VectorSetKind::Triangular => todo!(),
             // The sum of the vector multipliers is one.
@@ -167,13 +166,19 @@ impl ColorGenerator for VectorSet {
 
     #[doc(hidden)]
     #[cfg(test)]
-    fn as_vectorset(&self) -> Option<&VectorSet> { Some(self) }
+    fn as_vectorset(&self) -> Option<&VectorSet> {
+        Some(self)
+    }
 }
 
 impl ColorGenerator for VectorSetGroup {
     fn new_color(&self, rng: &mut dyn RngCore) -> Color {
-        if self.vectorsets.len() == 0 { return Color::default(); }
-        if self.vectorsets.len() == 1 { return self.vectorsets[0].new_color(rng); }
+        if self.vectorsets.len() == 0 {
+            return Color::default();
+        }
+        if self.vectorsets.len() == 1 {
+            return self.vectorsets[0].new_color(rng);
+        }
         let mut chance = rng.gen_range(0..self.total_chance.get());
         for vectorset in &*self.vectorsets {
             if chance < vectorset.chance.get() {
@@ -186,9 +191,10 @@ impl ColorGenerator for VectorSetGroup {
 
     #[doc(hidden)]
     #[cfg(test)]
-    fn as_vectorsetgroup(&self) -> Option<&VectorSetGroup> { Some(self) }
+    fn as_vectorsetgroup(&self) -> Option<&VectorSetGroup> {
+        Some(self)
+    }
 }
-
 
 // pub fn options(cmd: clap::Command) -> clap::Command {
 //     // let normal_color = arg!([normal_color] -N --normal "Default color generation.");
@@ -220,7 +226,9 @@ pub fn opts() -> impl IntoIterator<Item = Opt> {
 fn parse_color(s: &str) -> Result<Color, String> {
     let mut color = [0.0; 4];
     for (s, channel) in s.split(',').zip(color.iter_mut()) {
-        *channel = s.parse().map_err(|_| format!("incorrect color string: {:?}", s))?;
+        *channel = s
+            .parse()
+            .map_err(|_| format!("incorrect color string: {:?}", s))?;
     }
     Ok(Color::from_array(color))
 }
@@ -231,56 +239,127 @@ pub fn handle_opts(opts: &[GetoptItem<'_>]) -> Box<dyn ColorGenerator + Send + '
     let mut vectorsets = None;
     for opt in opts {
         match opt {
-            GetoptItem::Opt { opt, arg: None } if opt.long.as_deref() == Some("normal") => normal = true,
-            GetoptItem::Opt { opt, arg: None } if opt.long.as_deref() == Some("hues") => match vectorsets {
-                None => vectorsets = Some(Cow::Borrowed(FULL_INTENSITY_HUES)),
-                Some(ref mut cow) => cow.to_mut().extend_from_slice(FULL_INTENSITY_HUES),
-            },
-            GetoptItem::Opt { opt, arg: None } if opt.long.as_deref() == Some("newvectorset") => match vectorsets {
-                None => vectorsets = Some(vec![VectorSet { start: Color::default(), vectors: vec![].into(), chance: ONE, kind: VectorSetKind::Full }].into()),
-                Some(ref mut cow) => cow.to_mut().push(VectorSet { start: Color::default(), vectors: vec![].into(), chance: ONE, kind: VectorSetKind::Full }),
-            },
-            GetoptItem::Opt { opt, arg: Some(vector) } if opt.long.as_deref() == Some("vector") => {
+            GetoptItem::Opt { opt, arg: None } if opt.long.as_deref() == Some("normal") => {
+                normal = true
+            }
+            GetoptItem::Opt { opt, arg: None } if opt.long.as_deref() == Some("hues") => {
+                match vectorsets {
+                    None => vectorsets = Some(Cow::Borrowed(FULL_INTENSITY_HUES)),
+                    Some(ref mut cow) => cow.to_mut().extend_from_slice(FULL_INTENSITY_HUES),
+                }
+            }
+            GetoptItem::Opt { opt, arg: None } if opt.long.as_deref() == Some("newvectorset") => {
+                match vectorsets {
+                    None => {
+                        vectorsets = Some(
+                            vec![VectorSet {
+                                start: Color::default(),
+                                vectors: vec![].into(),
+                                chance: ONE,
+                                kind: VectorSetKind::Full,
+                            }]
+                            .into(),
+                        )
+                    }
+                    Some(ref mut cow) => cow.to_mut().push(VectorSet {
+                        start: Color::default(),
+                        vectors: vec![].into(),
+                        chance: ONE,
+                        kind: VectorSetKind::Full,
+                    }),
+                }
+            }
+            GetoptItem::Opt {
+                opt,
+                arg: Some(vector),
+            } if opt.long.as_deref() == Some("vector") => {
                 let vector = parse_color(vector).expect("TODO: error handling");
                 match vectorsets {
-                    None => vectorsets = Some(vec![VectorSet { start: Color::default(), vectors: vec![vector].into(), chance: ONE, kind: VectorSetKind::Full }].into()),
+                    None => {
+                        vectorsets = Some(
+                            vec![VectorSet {
+                                start: Color::default(),
+                                vectors: vec![vector].into(),
+                                chance: ONE,
+                                kind: VectorSetKind::Full,
+                            }]
+                            .into(),
+                        )
+                    }
                     Some(ref mut cow) => {
-                        let vectorset = cow.to_mut().last_mut().expect("vectorsets should never be an empty vec");
+                        let vectorset = cow
+                            .to_mut()
+                            .last_mut()
+                            .expect("vectorsets should never be an empty vec");
                         vectorset.vectors.to_mut().push(vector);
-                    },
+                    }
                 }
-            },
-            GetoptItem::Opt { opt, arg: Some(base) } if opt.long.as_deref() == Some("base") => {
+            }
+            GetoptItem::Opt {
+                opt,
+                arg: Some(base),
+            } if opt.long.as_deref() == Some("base") => {
                 let start = parse_color(base).expect("TODO: error handling");
                 match vectorsets {
-                    None => vectorsets = Some(vec![VectorSet { start, vectors: (&[][..]).into(), chance: ONE, kind: VectorSetKind::Full }].into()),
+                    None => {
+                        vectorsets = Some(
+                            vec![VectorSet {
+                                start,
+                                vectors: Cow::Borrowed(&[]),
+                                chance: ONE,
+                                kind: VectorSetKind::Full,
+                            }]
+                            .into(),
+                        )
+                    }
                     Some(ref mut cow) => {
-                        let vectorset = cow.to_mut().last_mut().expect("vectorsets should never be an empty vec");
+                        let vectorset = cow
+                            .to_mut()
+                            .last_mut()
+                            .expect("vectorsets should never be an empty vec");
                         vectorset.start = start;
-                    },
+                    }
                 }
-            },
-            GetoptItem::Opt { opt, arg: Some(r#type) } if opt.long.as_deref() == Some("type") => {
+            }
+            GetoptItem::Opt {
+                opt,
+                arg: Some(r#type),
+            } if opt.long.as_deref() == Some("type") => {
                 let kind = match *r#type {
                     "full" | "f" => VectorSetKind::Full,
                     "sum_one" | "sumone" | "one" | "o" => VectorSetKind::SumOne,
                     "triangular" | "tri" | "t" => VectorSetKind::Triangular,
-                    _ => panic!("TODO: error handling")
+                    _ => panic!("TODO: error handling"),
                 };
                 match vectorsets {
-                    None => vectorsets = Some(vec![VectorSet { start: Color::default(), vectors: (&[][..]).into(), chance: ONE, kind }].into()),
+                    None => {
+                        vectorsets = Some(
+                            vec![VectorSet {
+                                start: Color::default(),
+                                vectors: Cow::Borrowed(&[]),
+                                chance: ONE,
+                                kind,
+                            }]
+                            .into(),
+                        )
+                    }
                     Some(ref mut cow) => {
-                        let vectorset = cow.to_mut().last_mut().expect("vectorsets should never be an empty vec");
+                        let vectorset = cow
+                            .to_mut()
+                            .last_mut()
+                            .expect("vectorsets should never be an empty vec");
                         vectorset.kind = kind;
-                    },
+                    }
                 }
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
     match (normal, vectorsets) {
         (true | false, None) => Box::new(&BASIC_COLOR), // Default to basic if no colorspace is given
-        (false, Some(vectorsets)) => Box::new(VectorSetGroup::new(vectorsets).expect("vectorsets is not empty")),
+        (false, Some(vectorsets)) => {
+            Box::new(VectorSetGroup::new(vectorsets).expect("vectorsets is not empty"))
+        }
         (true, Some(_)) => panic!("Must provide only one colorspace"),
     }
 }
@@ -289,20 +368,22 @@ pub fn handle_opts(opts: &[GetoptItem<'_>]) -> Box<dyn ColorGenerator + Send + '
 mod tests {
     use getopt::Getopt;
 
-    use super::{VectorSetGroup, VectorSet, FULL_INTENSITY_HUES, BASIC_COLOR, from_3};
+    use super::{
+        from_3, Color, VectorSet, VectorSetGroup, VectorSetKind, BASIC_COLOR, FULL_INTENSITY_HUES,
+        ONE,
+    };
 
     #[test]
     fn basic_color_test() {
-        let args_iter: [&[&str]; 3] = [
-            &[],
-            &["-N"],
-            &["--normal"],
-        ];
+        let args_iter: [&[&str]; 3] = [&[], &["-N"], &["--normal"]];
 
         let getopt = Getopt::from_iter(super::opts()).unwrap();
 
         for args in args_iter {
-            let opts = getopt.parse(args.iter().copied()).collect::<Result<Vec<_>,_>>().unwrap();
+            let opts = getopt
+                .parse(args.iter().copied())
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
 
             let should_be_normal = super::handle_opts(&opts);
             let should_be_normal = should_be_normal.as_vectorset().unwrap();
@@ -312,15 +393,16 @@ mod tests {
 
     #[test]
     fn hues_test() {
-        let args_iter: [&[&str]; 1] = [
-            &["--hues"],
-        ];
+        let args_iter: [&[&str]; 1] = [&["--hues"]];
         let expected = VectorSetGroup::new(FULL_INTENSITY_HUES.into()).unwrap();
 
         let getopt = Getopt::from_iter(super::opts()).unwrap();
 
         for args in args_iter {
-            let opts = getopt.parse(args.iter().copied()).collect::<Result<Vec<_>,_>>().unwrap();
+            let opts = getopt
+                .parse(args.iter().copied())
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
 
             let should_be_hues = super::handle_opts(&opts);
             let should_be_hues = should_be_hues.as_vectorsetgroup().unwrap();
@@ -330,13 +412,27 @@ mod tests {
 
     #[test]
     fn vector_test() {
-        let empty = VectorSetGroup::new(vec![VectorSet::default()].into()).unwrap();
-        let redgreen = VectorSetGroup::new(vec![VectorSet {
-            start: from_3(0.0, 0.0, 0.0),
-            vectors: vec![from_3(1.0, 0.0, 0.0), from_3(0.0, 1.0, 0.0)].into(),
-            chance: super::ONE,
-            kind: super::VectorSetKind::Full,
-        }].into()).unwrap();
+        let empty = VectorSetGroup::new(
+            vec![VectorSet {
+                start: Color::default(),
+                vectors: vec![].into(),
+                chance: ONE,
+                kind: VectorSetKind::Full,
+            }]
+            .into(),
+        )
+        .unwrap();
+        let redgreen = VectorSetGroup::new(
+            vec![VectorSet {
+                start: from_3(0.0, 0.0, 0.0),
+                vectors: vec![from_3(1.0, 0.0, 0.0), from_3(0.0, 1.0, 0.0)].into(),
+                chance: super::ONE,
+                kind: super::VectorSetKind::Full,
+            }]
+            .into(),
+        )
+        .unwrap();
+        #[rustfmt::skip]
         let args_iter: [(&[&str], &VectorSetGroup); 8] = [
             (&["-n"], &empty),
             (&["--newvectorset"], &empty),
@@ -351,7 +447,10 @@ mod tests {
         let getopt = Getopt::from_iter(super::opts()).unwrap();
 
         for (args, expected) in args_iter {
-            let opts = getopt.parse(args.iter().copied()).collect::<Result<Vec<_>,_>>().unwrap();
+            let opts = getopt
+                .parse(args.iter().copied())
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
 
             let should_be_expected = super::handle_opts(&opts);
             let should_be_expected = should_be_expected.as_vectorsetgroup().unwrap();
