@@ -7,7 +7,7 @@ edition = "2021"
 default = ["framebuffer", "sdl2"]
 f32 = []
 sdl2 = ["dep:sdl2"]
-framebuffer = ["dep:bindgen"]
+framebuffer = ["dep:bindgen", "dep:libc"]
 
 [dependencies]
 rand = { version = "0.8.5", features = ["getrandom"] }
@@ -16,7 +16,7 @@ lazy_static = "1.4.0"
 tokio = { version = "1.21.2", default-features = false, features = ["sync", "rt"] }
 log = "0.4.17"
 env_logger = "0.9.1"
-libc = "0.2.134"
+libc = { version = "0.2.134", optional = true }
 rand_chacha = "0.3.1"
 sdl2 = { version = "0.35.2", optional = true }
 

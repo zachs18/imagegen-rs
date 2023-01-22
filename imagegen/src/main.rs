@@ -74,11 +74,11 @@ fn main() {
                 record.level(),
                 record.target(),
                 tid,
-                record.file().unwrap_or("<unknown>"),
-                match record.line() {
-                    Some(line) => format!("{}", line),
-                    None => "<unknown>".to_owned(),
-                },
+                record.file().unwrap_or("<unknown file>"),
+                record
+                    .line()
+                    .as_ref()
+                    .map_or::<&dyn std::fmt::Display, _>(&"<unknown line>", |line| line),
                 record.args(),
             )
         })
@@ -96,7 +96,7 @@ fn main() {
     .unwrap();
 
     let opts = getopt
-        .parse(args.iter().map(|x| &**x))
+        .parse(args.iter().map(String::as_str))
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
