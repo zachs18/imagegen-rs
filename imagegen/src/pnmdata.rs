@@ -1,3 +1,5 @@
+use std::simd::SimdFloat;
+
 use crate::color::{Channel, Color};
 
 pub struct PnmData {

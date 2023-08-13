@@ -99,7 +99,7 @@ fn place_seeds_common(
         let mut all_empty = Vec::with_capacity(dimx.get());
         log::trace!(
             "{} placed pixels according to bitmap",
-            data.placed_pixels.count()
+            data.placed_pixels.count_ones()
         );
         data.placed_pixels.for_each_false(|row, col| {
             debug_assert!(!data.placed_pixels.get((row, col)));

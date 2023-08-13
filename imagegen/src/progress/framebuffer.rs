@@ -1,6 +1,12 @@
 use std::{
-    fs::File, io::Error, mem::MaybeUninit, os::fd::AsRawFd, path::PathBuf, pin::Pin,
-    simd::simd_swizzle, sync::atomic::Ordering,
+    fs::File,
+    io::Error,
+    mem::MaybeUninit,
+    os::fd::AsRawFd,
+    path::PathBuf,
+    pin::Pin,
+    simd::{simd_swizzle, SimdFloat},
+    sync::atomic::Ordering,
 };
 
 use crate::{color::Color, progress::NoOpProgressor};
