@@ -1,4 +1,5 @@
 #![feature(portable_simd)]
+#![deny(rust_2018_idioms)]
 
 use std::{
     collections::VecDeque,
@@ -30,8 +31,8 @@ pub struct CommonLockedData {
     /// Represents to-be-placed pixels
     edges: VecDeque<Pixel>,
     // TODO:
-    // Pixels placed since the last iteration. Can be used to optimize progressors
-    // recently_placed: VecDeque<Pixel>,
+    // Pixels placed since the last iteration. Can be used to optimize
+    // progressors recently_placed: VecDeque<Pixel>,
 }
 
 pub struct CommonData {
@@ -75,10 +76,10 @@ fn main() {
                 record.target(),
                 tid,
                 record.file().unwrap_or("<unknown file>"),
-                record
-                    .line()
-                    .as_ref()
-                    .map_or::<&dyn std::fmt::Display, _>(&"<unknown line>", |line| line),
+                record.line().as_ref().map_or::<&dyn std::fmt::Display, _>(
+                    &"<unknown line>",
+                    |line| line
+                ),
                 record.args(),
             )
         })
@@ -106,7 +107,8 @@ fn main() {
     log::trace!("color_generator: {:?}", color_generator);
     let (progressor, progress_data) = progress::handle_opts(&opts);
     let geometry = geometry::handle_opts(&opts, &common_data);
-    // TODO: put geometry in common_data, maybe by having setup::handle_opts cann geometry::handle_opts
+    // TODO: put geometry in common_data, maybe by having setup::handle_opts
+    // cann geometry::handle_opts
 
     let _gen_thread = std::thread::spawn({
         let common_data = common_data.clone();
@@ -132,11 +134,10 @@ fn main() {
         .get_mut()
         .unwrap();
     // TODO: output file
-    locked
-        .image
-        .write_to(&mut std::io::stdout().lock())
-        .unwrap_or_else(|err| {
+    locked.image.write_to(&mut std::io::stdout().lock()).unwrap_or_else(
+        |err| {
             // TODO: better error handling (everywhere)
             panic!("Failed to write output image: {err:?}");
-        });
+        },
+    );
 }

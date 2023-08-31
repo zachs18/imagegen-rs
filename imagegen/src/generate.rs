@@ -85,17 +85,16 @@ fn place_seeds_common(
 
             data.image[(y, x)] = color_generator.new_color(rng);
             data.placed_pixels.set((y, x), true);
-            placed.push(Pixel {
-                x: x as _,
-                y: y as _,
-            });
+            placed.push(Pixel { x: x as _, y: y as _ });
 
             successes += 1;
             break 'retry;
         }
     }
     if successes < count {
-        log::trace!("naive seeding failed {failures} times (it placed {successes} / {count}); using slower always-successful version");
+        log::trace!(
+            "naive seeding failed {failures} times (it placed {successes} / {count}); using slower always-successful version"
+        );
         let mut all_empty = Vec::with_capacity(dimx.get());
         log::trace!(
             "{} placed pixels according to bitmap",
@@ -110,10 +109,7 @@ fn place_seeds_common(
 
             data.image[(y, x)] = color_generator.new_color(rng);
             data.placed_pixels.set((y, x), true);
-            placed.push(Pixel {
-                x: x as _,
-                y: y as _,
-            });
+            placed.push(Pixel { x: x as _, y: y as _ });
 
             successes += 1;
         }
@@ -123,8 +119,8 @@ fn place_seeds_common(
 
 /// For inner generation, only one neighbor is considered for fitness.
 /// Edges for inner generators are the actual placed pixels; when an edge is
-/// found to be the "best" for a color, that color is placed adjacent to the edge
-/// (and becomes an edge itself)
+/// found to be the "best" for a color, that color is placed adjacent to the
+/// edge (and becomes an edge itself)
 #[derive(Debug, Clone)]
 struct InnerGenerator {
     seeds: NonZeroUsize,
@@ -145,7 +141,8 @@ fn validate_inner_edges(
         placed_pixels.get((pixel.y as usize, pixel.x as usize)) && {
             let mut any_neighbor_open = false;
             'offsets: for offset in offsets {
-                // if let Some(canonical) = geometry.canonicalize(pixel + offset) {...}
+                // if let Some(canonical) = geometry.canonicalize(pixel +
+                // offset) {...}
                 let y = pixel.y + offset.dy;
                 if y < 0 || y as usize >= dimy.get() {
                     continue 'offsets;
@@ -164,7 +161,8 @@ fn validate_inner_edges(
     });
 }
 
-/// Chooses a neighbor to `pixel`, places `color` in the data at that location, sets it as placed in the bitmap, and adds it as an edge.
+/// Chooses a neighbor to `pixel`, places `color` in the data at that location,
+/// sets it as placed in the bitmap, and adds it as an edge.
 fn place_pixel_inner(
     dimy: NonZeroUsize,
     dimx: NonZeroUsize,
@@ -226,17 +224,22 @@ impl Generator for InnerGenerator {
             locked.edges.extend(seed_locations);
         }
 
-        let generate_colors =
-            |color_generator: &dyn ColorGenerator, rng: &mut dyn RngCore| -> Arc<[Color]> {
-                Arc::from_iter((0..self.colorcount.get()).map(|_| color_generator.new_color(rng)))
-            };
+        let generate_colors = |color_generator: &dyn ColorGenerator,
+                               rng: &mut dyn RngCore|
+         -> Arc<[Color]> {
+            Arc::from_iter(
+                (0..self.colorcount.get())
+                    .map(|_| color_generator.new_color(rng)),
+            )
+        };
 
         // Main loop
         if self.workers.get() == 1 {
             // Just do the calculation on this thread between the barriers.
             // Removes the need for channels/tokio.
-            // log::error!("single-thread generator not yet implemented. Run with '-w 2' or above.");
-            // todo!("single-thread generator main loop");
+            // log::error!("single-thread generator not yet implemented. Run
+            // with '-w 2' or above."); todo!("single-thread
+            // generator main loop");
 
             loop {
                 let mut best_places = vec![None; self.colorcount.get()];
@@ -276,11 +279,8 @@ impl Generator for InnerGenerator {
                     .pixels_generated
                     .fetch_add(colors.len(), Ordering::SeqCst);
                 {
-                    let CommonLockedData {
-                        image,
-                        placed_pixels,
-                        edges,
-                    } = &*common_data.locked.read().unwrap();
+                    let CommonLockedData { image, placed_pixels, edges } =
+                        &*common_data.locked.read().unwrap();
 
                     for edge in 0..edges.len() {
                         let pixel @ Pixel { x, y } = edges[edge];
@@ -289,14 +289,18 @@ impl Generator for InnerGenerator {
                         let y = y as usize;
 
                         let color = image[(y, x)];
-                        for (current_best, new_color) in best_places.iter_mut().zip(&*colors) {
+                        for (current_best, new_color) in
+                            best_places.iter_mut().zip(&*colors)
+                        {
                             // let fitness = fitness(*color, &image)
                             // TODO: configurable fitness function
                             let diff = color - new_color;
                             let sq_diff = diff * diff;
-                            let fitness: Channel = sq_diff.as_array().iter().sum();
+                            let fitness: Channel =
+                                sq_diff.as_array().iter().sum();
                             match current_best {
-                                Some((_, current_fitness)) if *current_fitness < fitness => {}
+                                Some((_, current_fitness))
+                                    if *current_fitness < fitness => {}
                                 _ => *current_best = Some((pixel, fitness)),
                             }
                         }
@@ -333,12 +337,16 @@ impl Generator for InnerGenerator {
                         &mut locked.placed_pixels,
                         &self.offsets,
                     ) {
-                        common_data.pixels_placed.fetch_add(1, Ordering::SeqCst);
+                        common_data
+                            .pixels_placed
+                            .fetch_add(1, Ordering::SeqCst);
                     } else {
                         log::warn!("failed to place pixel at {pixel:?}");
                     }
                 }
-                if common_data.pixels_placed.load(Ordering::SeqCst) == common_data.size.get() {
+                if common_data.pixels_placed.load(Ordering::SeqCst)
+                    == common_data.size.get()
+                {
                     common_data.finished.store(true, Ordering::SeqCst);
                     log::trace!("generator finished");
                 } else {
@@ -352,15 +360,18 @@ impl Generator for InnerGenerator {
                 }
             }
         } else {
-            // Supervisor sends the colors to the worker, the worker calculates the best places,
-            // the worker sends back the best places this worker saw with their fitness.
+            // Supervisor sends the colors to the worker, the worker calculates
+            // the best places, the worker sends back the best
+            // places this worker saw with their fitness.
             struct WorkerData {
                 colors_rx: tokio::sync::broadcast::Receiver<Arc<[Color]>>,
                 edges_rx: tokio::sync::mpsc::Receiver<Range<usize>>,
-                best_places_tx: tokio::sync::mpsc::Sender<Vec<Option<(Pixel, Channel)>>>,
+                best_places_tx:
+                    tokio::sync::mpsc::Sender<Vec<Option<(Pixel, Channel)>>>,
                 data: GeneratorData,
                 common_data: Arc<CommonData>,
-                generator: InnerGenerator, // TODO: something better than cloning self
+                generator: InnerGenerator, /* TODO: something better than
+                                            * cloning self */
             }
             let mut handles = Vec::with_capacity(self.workers.get());
             let mut edges_txs = Vec::with_capacity(self.workers.get());
@@ -453,9 +464,8 @@ impl Generator for InnerGenerator {
                 }));
             }
 
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .build()
-                .unwrap();
+            let rt =
+                tokio::runtime::Builder::new_current_thread().build().unwrap();
 
             rt.block_on(async {
                 loop {
@@ -603,9 +613,9 @@ impl Generator for InnerGenerator {
             });
             drop(colors_tx);
             for handle in handles {
-                handle
-                    .join()
-                    .unwrap_or_else(|err| log::error!("Worker panicked: {err:?}"));
+                handle.join().unwrap_or_else(|err| {
+                    log::error!("Worker panicked: {err:?}")
+                });
             }
         }
     }
@@ -681,7 +691,7 @@ pub fn opts() -> impl IntoIterator<Item = Opt> {
     ]
 }
 
-pub fn handle_opts(opts: &[GetoptItem]) -> Box<dyn Generator + Send> {
+pub fn handle_opts(opts: &[GetoptItem<'_>]) -> Box<dyn Generator + Send> {
     let mut settings = GeneratorSettings::default();
 
     macro_rules! set {
@@ -692,7 +702,9 @@ pub fn handle_opts(opts: &[GetoptItem]) -> Box<dyn Generator + Send> {
                 stringify!($field)
             ));
             match &mut settings.$field {
-                Some(_) => panic!("multiple {} values specified", stringify!($field)),
+                Some(_) => {
+                    panic!("multiple {} values specified", stringify!($field))
+                }
                 None => settings.$field = Some($field),
             }
         };
@@ -709,55 +721,58 @@ pub fn handle_opts(opts: &[GetoptItem]) -> Box<dyn Generator + Send> {
 
     for opt in opts {
         match opt {
-            GetoptItem::Opt {
-                opt,
-                arg: Some(seeds),
-            } if opt.long.as_deref() == Some("seeds") => {
+            GetoptItem::Opt { opt, arg: Some(seeds) }
+                if opt.is_long("seeds") =>
+            {
                 set!(seeds);
             }
-            GetoptItem::Opt {
-                opt,
-                arg: Some(offset),
-            } if opt.long.as_deref() == Some("offsets") => match *offset {
-                "n" => add_offsets!(NORMAL_OFFSETS),
-                "o" => add_offsets!(ORTHOGONAL_OFFSETS),
-                "d" => add_offsets!(DIAGONAL_OFFSETS),
-                "k" => add_offsets!(KNIGHT_OFFSETS),
-                _ => {
-                    if let Some(captures) = OFFSET_REGEX.captures(offset) {
-                        match (
-                            captures.get(1).and_then(|mtch| mtch.as_str().parse().ok()),
-                            captures.get(2).and_then(|mtch| mtch.as_str().parse().ok()),
-                        ) {
-                            (None, None) => todo!(),
-                            (None, Some(_)) => todo!(),
-                            (Some(_), None) => todo!(),
-                            (Some(dx), Some(dy)) => add_offsets!([Offset { dx, dy }]),
+            GetoptItem::Opt { opt, arg: Some(offset) }
+                if opt.is_long("offsets") =>
+            {
+                match *offset {
+                    "n" => add_offsets!(NORMAL_OFFSETS),
+                    "o" => add_offsets!(ORTHOGONAL_OFFSETS),
+                    "d" => add_offsets!(DIAGONAL_OFFSETS),
+                    "k" => add_offsets!(KNIGHT_OFFSETS),
+                    _ => {
+                        if let Some(captures) = OFFSET_REGEX.captures(offset) {
+                            match (
+                                captures.get(1).and_then(|mtch| {
+                                    mtch.as_str().parse().ok()
+                                }),
+                                captures.get(2).and_then(|mtch| {
+                                    mtch.as_str().parse().ok()
+                                }),
+                            ) {
+                                (None, None) => todo!(),
+                                (None, Some(_)) => todo!(),
+                                (Some(_), None) => todo!(),
+                                (Some(dx), Some(dy)) => {
+                                    add_offsets!([Offset { dx, dy }])
+                                }
+                            }
+                        } else {
+                            todo!("error");
                         }
-                    } else {
-                        todo!("error");
                     }
                 }
-            },
-            GetoptItem::Opt {
-                opt,
-                arg: Some(workers),
-            } if opt.long.as_deref() == Some("workers") => {
+            }
+            GetoptItem::Opt { opt, arg: Some(workers) }
+                if opt.is_long("workers") =>
+            {
                 set!(workers);
             }
-            GetoptItem::Opt {
-                opt,
-                arg: Some(colorcount),
-            } if opt.long.as_deref() == Some("colorcount") => {
+            GetoptItem::Opt { opt, arg: Some(colorcount) }
+                if opt.is_long("colorcount") =>
+            {
                 set!(colorcount);
             }
-            GetoptItem::Opt {
-                opt,
-                arg: Some(maxfitness),
-            } if opt.long.as_deref() == Some("maxfitness") => {
+            GetoptItem::Opt { opt, arg: Some(maxfitness) }
+                if opt.is_long("maxfitness") =>
+            {
                 set!(maxfitness);
             }
-            GetoptItem::Opt { opt, arg: None } if opt.long.as_deref() == Some("outer") => {
+            GetoptItem::Opt { opt, arg: None } if opt.is_long("outer") => {
                 todo!("figure out wait handling")
             }
             _ => {}
@@ -771,7 +786,9 @@ pub fn handle_opts(opts: &[GetoptItem]) -> Box<dyn Generator + Send> {
                 .offsets
                 .unwrap_or_else(|| Vec::from(NORMAL_OFFSETS)),
             workers: settings.workers.unwrap_or(NonZeroUsize::new(1).unwrap()),
-            colorcount: settings.colorcount.unwrap_or(NonZeroUsize::new(1).unwrap()),
+            colorcount: settings
+                .colorcount
+                .unwrap_or(NonZeroUsize::new(1).unwrap()),
             maxfitness: settings.maxfitness,
         }),
     }
@@ -783,11 +800,14 @@ mod tests {
 
     use getopt::Getopt;
 
-    use super::{Offset, DIAGONAL_OFFSETS, KNIGHT_OFFSETS, NORMAL_OFFSETS, ORTHOGONAL_OFFSETS};
+    use super::{
+        Offset, DIAGONAL_OFFSETS, KNIGHT_OFFSETS, NORMAL_OFFSETS,
+        ORTHOGONAL_OFFSETS,
+    };
 
     #[test]
     fn basic_offsets() {
-        let args_iter: [(&[&str], Cow<[Offset]>); 9] = [
+        let args_iter: [(&[&str], Cow<'_, [Offset]>); 9] = [
             (&[], NORMAL_OFFSETS.into()),
             (&["-On"], NORMAL_OFFSETS.into()),
             (&["-Oo"], ORTHOGONAL_OFFSETS.into()),

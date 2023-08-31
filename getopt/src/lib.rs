@@ -2,17 +2,26 @@ use std::{borrow::Cow, collections::VecDeque, iter::Peekable};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum HasArgument {
-    /// This short option does not have an argument. Further characters in the same parameter are parsed as short options.
+    /// This short option does not have an argument. Further characters in the
+    /// same parameter are parsed as short options.
+    ///
     /// This long option does not have an argument.
     No,
-    /// This short option has an argument. It may be specified in the same parameter "-oarg" or in the next "-o arg" or with an `=` "-o=arg".
-    /// This long option does not have an argument.  It may be specified in the next parameter "--out arg" or with an `=` "--out=arg".
-    Yes,
-    /// This short option has an optional argument. It may be specified in the same parameter "-oarg" or in the next "-o arg" or with an `=` "-o=arg".
-    /// (for short) If the next parameter starts with `-`, it will not be considered an argument for this option.
+    /// This short option has an argument. It may be specified in the same
+    /// parameter "-oarg" or in the next "-o arg" or with an `=` "-o=arg".
     ///
-    /// This long option has an optional argument. It may be specified in the next parameter "--out arg" or with an `=` "--out=arg".
-    /// (for long) If the next parameter starts with `-`, it will not be considered an argument for this option.
+    /// This long option does not have an argument.  It may be specified in the
+    /// next parameter "--out arg" or with an `=` "--out=arg".
+    Yes,
+    /// This short option has an optional argument. It may be specified in the
+    /// same parameter "-oarg" or in the next "-o arg" or with an `=` "-o=arg".
+    /// (for short) If the next parameter starts with `-`, it will not be
+    /// considered an argument for this option.
+    ///
+    /// This long option has an optional argument. It may be specified in the
+    /// next parameter "--out arg" or with an `=` "--out=arg". (for long)
+    /// If the next parameter starts with `-`, it will not be considered an
+    /// argument for this option.
     Optional,
 }
 
@@ -23,29 +32,78 @@ pub struct Opt {
     pub has_argument: HasArgument,
 }
 
+/// Error returned when validating an `Opt` if the `Opt` is invalid, or adding
+/// it to a `GetOpt` if the `Opt` is invalid or a duplicate.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, thiserror::Error)]
+#[non_exhaustive]
+pub enum InvalidOptError {
+    #[error("short options must not be `\0`, `=`, or `-`")]
+    InvalidShortOption(char),
+    #[error("long options must not contain `\0`, `=`, or `-`")]
+    InvalidLongOption(Cow<'static, str>),
+    #[error("long options must not be empty")]
+    EmptyLongOption,
+    #[error(
+        "an `Opt` must have either a short option, a long option, or both"
+    )]
+    BothNone,
+    #[error(
+        "an `Opt` with the same short option already exists in this `GetOpt`"
+    )]
+    DuplicateShortOption(char),
+    #[error(
+        "an `Opt` with the same long option already exists in this `GetOpt`"
+    )]
+    DuplicateLongOption(Cow<'static, str>),
+}
+
 impl Opt {
     pub fn short(short: char, arg: HasArgument) -> Self {
-        Opt {
-            short: Some(short),
-            long: None,
-            has_argument: arg,
-        }
+        Opt { short: Some(short), long: None, has_argument: arg }
     }
 
     pub fn long(long: impl Into<Cow<'static, str>>, arg: HasArgument) -> Self {
-        Opt {
-            short: None,
-            long: Some(long.into()),
-            has_argument: arg,
+        Opt { short: None, long: Some(long.into()), has_argument: arg }
+    }
+
+    pub fn short_long(
+        short: char,
+        long: impl Into<Cow<'static, str>>,
+        arg: HasArgument,
+    ) -> Self {
+        Opt { short: Some(short), long: Some(long.into()), has_argument: arg }
+    }
+
+    pub fn validate(&self) -> Result<(), InvalidOptError> {
+        match (&self.short, &self.long) {
+            (None, None) => Err(InvalidOptError::BothNone),
+            (Some(short), _) if "\0-=".contains(*short) => {
+                Err(InvalidOptError::InvalidShortOption(*short))
+            }
+            (_, Some(long)) if long.is_empty() => {
+                Err(InvalidOptError::EmptyLongOption)
+            }
+            (_, Some(long))
+                if memchr::memchr3(b'\0', b'-', b'=', long.as_bytes())
+                    .is_some() =>
+            {
+                Err(InvalidOptError::InvalidLongOption(long.clone()))
+            }
+            _ => Ok(()),
         }
     }
 
-    pub fn short_long(short: char, long: impl Into<Cow<'static, str>>, arg: HasArgument) -> Self {
-        Opt {
-            short: Some(short),
-            long: Some(long.into()),
-            has_argument: arg,
-        }
+    pub fn validated(self) -> Result<Self, InvalidOptError> {
+        self.validate()?;
+        Ok(self)
+    }
+
+    pub fn is_short(&self, short: char) -> bool {
+        self.short == Some(short)
+    }
+
+    pub fn is_long(&self, long: &str) -> bool {
+        self.long.as_deref() == Some(long)
     }
 }
 
@@ -67,36 +125,32 @@ impl Getopt {
         }
     }
 
-    pub fn add_option(&mut self, opt: Opt) -> Result<(), (&'static str, Opt)> {
-        if opt.short.is_none() && opt.long.is_none() {
-            return Err(("short and long cannot both be None", opt));
-        } else if opt.short.is_some() && "\0-=".contains(opt.short.unwrap()) {
-            return Err(("short option cannot be '\0', '-', or '='", opt));
-        } else if opt.long.is_some() && opt.long.as_ref().unwrap().len() == 0 {
-            return Err(("long option cannot be empty string", opt));
-        } else if opt.long.is_some()
-            && memchr::memchr3(b'\0', b'-', b'=', opt.long.as_ref().unwrap().as_bytes()).is_some()
-        {
-            return Err(("long option cannot contain '\0', '-', or '='", opt));
-        } else if let Some(existing_opt) = self.options.iter().find(|e_opt| {
+    pub fn add_option(&mut self, opt: Opt) -> Result<(), InvalidOptError> {
+        opt.validate()?;
+        if let Some(existing_opt) = self.options.iter().find(|e_opt| {
             (e_opt.short.is_some() && e_opt.short == opt.short)
                 || (e_opt.long.is_some() && e_opt.long == opt.long)
         }) {
             if existing_opt.short == opt.short {
-                return Err(("duplicate short option", opt));
+                return Err(InvalidOptError::DuplicateShortOption(
+                    opt.short.unwrap(),
+                ));
             } else {
-                return Err(("duplicate long option", opt));
+                return Err(InvalidOptError::DuplicateLongOption(
+                    opt.long.unwrap(),
+                ));
             }
         }
         self.options.push(opt);
         Ok(())
     }
 
-    pub fn from_iter(iter: impl IntoIterator<Item = Opt>) -> Result<Self, (&'static str, Opt)> {
+    pub fn from_iter(
+        iter: impl IntoIterator<Item = Opt>,
+    ) -> Result<Self, InvalidOptError> {
         let iter = iter.into_iter();
-        let mut this = Getopt {
-            options: Vec::with_capacity(iter.size_hint().0),
-        };
+        let mut this =
+            Getopt { options: Vec::with_capacity(iter.size_hint().0) };
         for opt in iter {
             this.add_option(opt)?;
         }
@@ -112,9 +166,11 @@ pub enum GetoptItem<'a> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GetoptError<'a> {
-    // Includes the case where a recognized short opt did not have a required argument or had an unexpected argument (with '=').
+    // Includes the case where a recognized short opt did not have a required
+    // argument or had an unexpected argument (with '=').
     UnrecognizedShortOpt { opt: char, arg: Option<&'a str> },
-    // Includes the case where a recognized long opt did not have a required argument or had an unexpected argument (with '=').
+    // Includes the case where a recognized long opt did not have a required
+    // argument or had an unexpected argument (with '=').
     UnrecognizedLongOpt { opt: &'a str, arg: Option<&'a str> },
 }
 
@@ -152,39 +208,48 @@ impl<'a, I: Iterator<Item = &'a str>> Iterator for GetoptIter<'a, I> {
                 .find(|r_opt| Some(opt) == r_opt.long.as_deref())
             {
                 Some(r_opt) => r_opt,
-                None => return Some(Err(GetoptError::UnrecognizedLongOpt { opt, arg })),
+                None => {
+                    return Some(Err(GetoptError::UnrecognizedLongOpt {
+                        opt,
+                        arg,
+                    }));
+                }
             };
             match (r_opt.has_argument, arg) {
                 // Correct, return immediately
                 (HasArgument::No, None)
                 | (HasArgument::Yes, Some(_))
-                | (HasArgument::Optional, Some(_)) => Some(Ok(GetoptItem::Opt { opt: r_opt, arg })),
+                | (HasArgument::Optional, Some(_)) => {
+                    Some(Ok(GetoptItem::Opt { opt: r_opt, arg }))
+                }
                 // Incorrect, return immediately
                 (HasArgument::No, Some(_)) => {
                     Some(Err(GetoptError::UnrecognizedLongOpt { opt, arg }))
                 }
                 // May require additional parsing
                 (HasArgument::Yes, None) => match self.args.next() {
-                    Some(arg) => Some(Ok(GetoptItem::Opt {
-                        opt: r_opt,
-                        arg: Some(arg),
-                    })),
-                    None => Some(Err(GetoptError::UnrecognizedLongOpt { opt, arg })),
+                    Some(arg) => {
+                        Some(Ok(GetoptItem::Opt { opt: r_opt, arg: Some(arg) }))
+                    }
+                    None => {
+                        Some(Err(GetoptError::UnrecognizedLongOpt { opt, arg }))
+                    }
                 },
                 (HasArgument::Optional, None) => match self.args.peek() {
-                    Some(arg) if !arg.starts_with('-') => Some(Ok(GetoptItem::Opt {
-                        opt: r_opt,
-                        arg: self.args.next(),
-                    })),
-                    Some(_) | None => Some(Ok(GetoptItem::Opt {
-                        opt: r_opt,
-                        arg: None,
-                    })),
+                    Some(arg) if !arg.starts_with('-') => {
+                        Some(Ok(GetoptItem::Opt {
+                            opt: r_opt,
+                            arg: self.args.next(),
+                        }))
+                    }
+                    Some(_) | None => {
+                        Some(Ok(GetoptItem::Opt { opt: r_opt, arg: None }))
+                    }
                 },
             }
         } else if opt.starts_with("-") {
-            // '-' can be used to force an optional-arg opt to not have an arg, e.g.
-            // (a, b no arg, c optional arg)
+            // '-' can be used to force an optional-arg opt to not have an arg,
+            // e.g. (a, b no arg, c optional arg)
             // -abc - nonopt
             // -> Short('a'), Short('b'), Short('c', None), NonOpt("nonopt")
 
@@ -195,28 +260,36 @@ impl<'a, I: Iterator<Item = &'a str>> Iterator for GetoptIter<'a, I> {
 
             let mut opt = opt[1..].chars(); // skip '-'
             loop {
-                // Take one char from it each time, until we reach an arg-having opt, or an unrecognized opt
+                // Take one char from it each time, until we reach an arg-having
+                // opt, or an unrecognized opt
                 let c_opt = match opt.next() {
                     Some(c_opt) => c_opt,
                     None => break,
                 };
-                let r_opt = match self.opts.iter().find(|r_opt| Some(c_opt) == r_opt.short) {
+                let r_opt = match self
+                    .opts
+                    .iter()
+                    .find(|r_opt| Some(c_opt) == r_opt.short)
+                {
                     Some(r_opt) => r_opt,
                     None => {
-                        // Only assume the unrecognized shortopt has an arg if its explicit with '='
+                        // Only assume the unrecognized shortopt has an arg if
+                        // its explicit with '='
                         if opt.as_str().starts_with('=') {
-                            self.backlog
-                                .push_back(Err(GetoptError::UnrecognizedShortOpt {
+                            self.backlog.push_back(Err(
+                                GetoptError::UnrecognizedShortOpt {
                                     opt: c_opt,
                                     arg: Some(&opt.as_str()[1..]),
-                                }));
+                                },
+                            ));
                             break;
                         } else {
-                            self.backlog
-                                .push_back(Err(GetoptError::UnrecognizedShortOpt {
+                            self.backlog.push_back(Err(
+                                GetoptError::UnrecognizedShortOpt {
                                     opt: c_opt,
                                     arg: None,
-                                }));
+                                },
+                            ));
                             continue;
                         }
                     }
@@ -224,17 +297,20 @@ impl<'a, I: Iterator<Item = &'a str>> Iterator for GetoptIter<'a, I> {
 
                 match (r_opt.has_argument, opt.as_str()) {
                     (HasArgument::No, arg) if arg.starts_with('=') => {
-                        self.backlog
-                            .push_back(Err(GetoptError::UnrecognizedShortOpt {
+                        self.backlog.push_back(Err(
+                            GetoptError::UnrecognizedShortOpt {
                                 opt: c_opt,
                                 arg: Some(&arg[1..]),
-                            }));
+                            },
+                        ));
                         break;
                     }
-                    (HasArgument::No, _) => self.backlog.push_back(Ok(GetoptItem::Opt {
-                        opt: r_opt,
-                        arg: None,
-                    })),
+                    (HasArgument::No, _) => {
+                        self.backlog.push_back(Ok(GetoptItem::Opt {
+                            opt: r_opt,
+                            arg: None,
+                        }))
+                    }
                     (HasArgument::Yes, arg) if arg.len() == 0 => {
                         self.backlog.push_back(match self.args.next() {
                             Some(arg) => Ok(GetoptItem::Opt {
@@ -264,14 +340,15 @@ impl<'a, I: Iterator<Item = &'a str>> Iterator for GetoptIter<'a, I> {
                     }
                     (HasArgument::Optional, arg) if arg.len() == 0 => {
                         self.backlog.push_back(match self.args.peek() {
-                            Some(arg) if !arg.starts_with('-') => Ok(GetoptItem::Opt {
-                                opt: r_opt,
-                                arg: self.args.next(),
-                            }),
-                            Some(_) | None => Ok(GetoptItem::Opt {
-                                opt: r_opt,
-                                arg: None,
-                            }),
+                            Some(arg) if !arg.starts_with('-') => {
+                                Ok(GetoptItem::Opt {
+                                    opt: r_opt,
+                                    arg: self.args.next(),
+                                })
+                            }
+                            Some(_) | None => {
+                                Ok(GetoptItem::Opt { opt: r_opt, arg: None })
+                            }
                         });
                         break;
                     }
@@ -292,8 +369,10 @@ impl<'a, I: Iterator<Item = &'a str>> Iterator for GetoptIter<'a, I> {
                 }
             }
             // should use backlog, unless this was '-'
-            // FIXME: possibility of stack overflow with a lot of consecutive malicious '-' arguments
-            // FIXME: maybe put whole function in `'tailcall: loop { ... }`, and use `continue 'tailcall;`
+            // FIXME: possibility of stack overflow with a lot of consecutive
+            // malicious '-' arguments FIXME: maybe put whole
+            // function in `'tailcall: loop { ... }`, and use `continue
+            // 'tailcall;`
             self.next()
         } else {
             // NonOpt
@@ -311,7 +390,8 @@ mod tests {
         let a = Opt::short('a', HasArgument::No);
         let b = Opt::short('b', HasArgument::No);
         let c = Opt::short('c', HasArgument::Optional);
-        let getopt = Getopt::from_iter([a.clone(), b.clone(), c.clone()]).unwrap();
+        let getopt =
+            Getopt::from_iter([a.clone(), b.clone(), c.clone()]).unwrap();
 
         assert_eq!(
             getopt.parse(["-abc"]).collect::<Vec<_>>(),
@@ -327,10 +407,7 @@ mod tests {
             vec![
                 Ok(GetoptItem::Opt { opt: &a, arg: None }),
                 Ok(GetoptItem::Opt { opt: &b, arg: None }),
-                Ok(GetoptItem::Opt {
-                    opt: &c,
-                    arg: Some("arg=arg")
-                }),
+                Ok(GetoptItem::Opt { opt: &c, arg: Some("arg=arg") }),
             ]
         );
 
@@ -339,10 +416,7 @@ mod tests {
             vec![
                 Ok(GetoptItem::Opt { opt: &a, arg: None }),
                 Ok(GetoptItem::Opt { opt: &b, arg: None }),
-                Ok(GetoptItem::Opt {
-                    opt: &c,
-                    arg: Some("arg=arg")
-                }),
+                Ok(GetoptItem::Opt { opt: &c, arg: Some("arg=arg") }),
             ]
         );
 
@@ -351,10 +425,7 @@ mod tests {
             vec![
                 Ok(GetoptItem::Opt { opt: &a, arg: None }),
                 Ok(GetoptItem::Opt { opt: &b, arg: None }),
-                Ok(GetoptItem::Opt {
-                    opt: &c,
-                    arg: Some("arg=arg")
-                }),
+                Ok(GetoptItem::Opt { opt: &c, arg: Some("arg=arg") }),
             ]
         );
     }
@@ -364,16 +435,14 @@ mod tests {
         let a = Opt::short('a', HasArgument::No);
         let b = Opt::short('b', HasArgument::Yes);
         let c = Opt::short('c', HasArgument::Optional);
-        let getopt = Getopt::from_iter([a.clone(), b.clone(), c.clone()]).unwrap();
+        let getopt =
+            Getopt::from_iter([a.clone(), b.clone(), c.clone()]).unwrap();
 
         assert_eq!(
             getopt.parse(["-abc"]).collect::<Vec<_>>(),
             vec![
                 Ok(GetoptItem::Opt { opt: &a, arg: None }),
-                Ok(GetoptItem::Opt {
-                    opt: &b,
-                    arg: Some("c")
-                }),
+                Ok(GetoptItem::Opt { opt: &b, arg: Some("c") }),
             ]
         );
 
@@ -381,10 +450,7 @@ mod tests {
             getopt.parse(["-abcarg=arg"]).collect::<Vec<_>>(),
             vec![
                 Ok(GetoptItem::Opt { opt: &a, arg: None }),
-                Ok(GetoptItem::Opt {
-                    opt: &b,
-                    arg: Some("carg=arg")
-                }),
+                Ok(GetoptItem::Opt { opt: &b, arg: Some("carg=arg") }),
             ]
         );
 
@@ -392,10 +458,7 @@ mod tests {
             getopt.parse(["-abc=arg=arg"]).collect::<Vec<_>>(),
             vec![
                 Ok(GetoptItem::Opt { opt: &a, arg: None }),
-                Ok(GetoptItem::Opt {
-                    opt: &b,
-                    arg: Some("c=arg=arg")
-                }),
+                Ok(GetoptItem::Opt { opt: &b, arg: Some("c=arg=arg") }),
             ]
         );
 
@@ -403,10 +466,7 @@ mod tests {
             getopt.parse(["-abc", "arg=arg"]).collect::<Vec<_>>(),
             vec![
                 Ok(GetoptItem::Opt { opt: &a, arg: None }),
-                Ok(GetoptItem::Opt {
-                    opt: &b,
-                    arg: Some("c")
-                }),
+                Ok(GetoptItem::Opt { opt: &b, arg: Some("c") }),
                 Ok(GetoptItem::NonOpt("arg=arg")),
             ]
         );
@@ -415,10 +475,7 @@ mod tests {
             getopt.parse(["-ab", "arg=arg"]).collect::<Vec<_>>(),
             vec![
                 Ok(GetoptItem::Opt { opt: &a, arg: None }),
-                Ok(GetoptItem::Opt {
-                    opt: &b,
-                    arg: Some("arg=arg")
-                }),
+                Ok(GetoptItem::Opt { opt: &b, arg: Some("arg=arg") }),
             ]
         );
 
@@ -426,10 +483,7 @@ mod tests {
             getopt.parse(["-ab", "-carg=arg"]).collect::<Vec<_>>(),
             vec![
                 Ok(GetoptItem::Opt { opt: &a, arg: None }),
-                Ok(GetoptItem::Opt {
-                    opt: &b,
-                    arg: Some("-carg=arg")
-                }),
+                Ok(GetoptItem::Opt { opt: &b, arg: Some("-carg=arg") }),
             ]
         );
 
@@ -437,10 +491,7 @@ mod tests {
             getopt.parse(["-ab"]).collect::<Vec<_>>(),
             vec![
                 Ok(GetoptItem::Opt { opt: &a, arg: None }),
-                Err(GetoptError::UnrecognizedShortOpt {
-                    opt: 'b',
-                    arg: None
-                }),
+                Err(GetoptError::UnrecognizedShortOpt { opt: 'b', arg: None }),
             ]
         );
     }
@@ -450,7 +501,8 @@ mod tests {
         let a = Opt::long("a", HasArgument::No);
         let b = Opt::long("b", HasArgument::No);
         let c = Opt::long("c", HasArgument::Optional);
-        let getopt = Getopt::from_iter([a.clone(), b.clone(), c.clone()]).unwrap();
+        let getopt =
+            Getopt::from_iter([a.clone(), b.clone(), c.clone()]).unwrap();
 
         assert_eq!(
             getopt.parse(["--a", "--b", "--c"]).collect::<Vec<_>>(),
@@ -462,37 +514,25 @@ mod tests {
         );
 
         assert_eq!(
-            getopt
-                .parse(["--a", "--b", "--c=arg=arg"])
-                .collect::<Vec<_>>(),
+            getopt.parse(["--a", "--b", "--c=arg=arg"]).collect::<Vec<_>>(),
             vec![
                 Ok(GetoptItem::Opt { opt: &a, arg: None }),
                 Ok(GetoptItem::Opt { opt: &b, arg: None }),
-                Ok(GetoptItem::Opt {
-                    opt: &c,
-                    arg: Some("arg=arg")
-                }),
+                Ok(GetoptItem::Opt { opt: &c, arg: Some("arg=arg") }),
             ]
         );
 
         assert_eq!(
-            getopt
-                .parse(["--a", "--b", "--c", "arg=arg"])
-                .collect::<Vec<_>>(),
+            getopt.parse(["--a", "--b", "--c", "arg=arg"]).collect::<Vec<_>>(),
             vec![
                 Ok(GetoptItem::Opt { opt: &a, arg: None }),
                 Ok(GetoptItem::Opt { opt: &b, arg: None }),
-                Ok(GetoptItem::Opt {
-                    opt: &c,
-                    arg: Some("arg=arg")
-                }),
+                Ok(GetoptItem::Opt { opt: &c, arg: Some("arg=arg") }),
             ]
         );
 
         assert_eq!(
-            getopt
-                .parse(["--a", "--b", "--carg=arg"])
-                .collect::<Vec<_>>(),
+            getopt.parse(["--a", "--b", "--carg=arg"]).collect::<Vec<_>>(),
             vec![
                 Ok(GetoptItem::Opt { opt: &a, arg: None }),
                 Ok(GetoptItem::Opt { opt: &b, arg: None }),
@@ -509,35 +549,23 @@ mod tests {
         let a = Opt::long("a", HasArgument::No);
         let b = Opt::long("b", HasArgument::Yes);
         let c = Opt::long("c", HasArgument::Optional);
-        let getopt = Getopt::from_iter([a.clone(), b.clone(), c.clone()]).unwrap();
+        let getopt =
+            Getopt::from_iter([a.clone(), b.clone(), c.clone()]).unwrap();
 
         assert_eq!(
-            getopt
-                .parse(["--a", "--b", "--c=arg=arg"])
-                .collect::<Vec<_>>(),
+            getopt.parse(["--a", "--b", "--c=arg=arg"]).collect::<Vec<_>>(),
             vec![
                 Ok(GetoptItem::Opt { opt: &a, arg: None }),
-                Ok(GetoptItem::Opt {
-                    opt: &b,
-                    arg: Some("--c=arg=arg")
-                }),
+                Ok(GetoptItem::Opt { opt: &b, arg: Some("--c=arg=arg") }),
             ]
         );
 
         assert_eq!(
-            getopt
-                .parse(["--a", "--b=", "--c=arg=arg"])
-                .collect::<Vec<_>>(),
+            getopt.parse(["--a", "--b=", "--c=arg=arg"]).collect::<Vec<_>>(),
             vec![
                 Ok(GetoptItem::Opt { opt: &a, arg: None }),
-                Ok(GetoptItem::Opt {
-                    opt: &b,
-                    arg: Some("")
-                }),
-                Ok(GetoptItem::Opt {
-                    opt: &c,
-                    arg: Some("arg=arg")
-                }),
+                Ok(GetoptItem::Opt { opt: &b, arg: Some("") }),
+                Ok(GetoptItem::Opt { opt: &c, arg: Some("arg=arg") }),
             ]
         );
 
@@ -545,10 +573,7 @@ mod tests {
             getopt.parse(["--a", "--b"]).collect::<Vec<_>>(),
             vec![
                 Ok(GetoptItem::Opt { opt: &a, arg: None }),
-                Err(GetoptError::UnrecognizedLongOpt {
-                    opt: "b",
-                    arg: None
-                }),
+                Err(GetoptError::UnrecognizedLongOpt { opt: "b", arg: None }),
             ]
         );
     }

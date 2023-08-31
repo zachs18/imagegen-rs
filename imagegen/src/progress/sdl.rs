@@ -45,7 +45,7 @@ impl<'a> Index<(usize, usize)> for SdlSurfacePixelsMut<'a> {
             panic!("index out of bounds");
         }
         let byte_idx = col * 4 + row * self.byte_stride;
-        unsafe { &*(self.data.wrapping_add(byte_idx).cast() as *const [u8; 4]) }
+        unsafe { &*(self.data.wrapping_add(byte_idx).cast_const().cast()) }
     }
 }
 
@@ -67,13 +67,16 @@ impl Progressor for Sdl2Progressor {
             + for<'a> FnOnce(
                 super::ProgressData,
                 &'a super::ProgressSupervisorData<'a>,
-            ) -> Pin<Box<dyn std::future::Future<Output = ()> + 'a>>,
+            ) -> Pin<
+                Box<dyn std::future::Future<Output = ()> + 'a>,
+            >,
     > {
         Box::new({
             move |progress_data, common_data| {
                 let fut = async move {
                     let noop_fallback = NoOpProgressor;
-                    // return noop_fallback.run_under_supervisor(data, common_data);
+                    // return noop_fallback.run_under_supervisor(data,
+                    // common_data);
 
                     log::trace!(target: "sdl", "initializing sdl on thread {:?}", std::thread::current());
                     let sdl_context = match sdl2::init() {
@@ -91,7 +94,9 @@ impl Progressor for Sdl2Progressor {
                     let mut events = match sdl_context.event_pump() {
                         Ok(events) => events,
                         Err(error) => {
-                            log::error!("Failed to initialize SDL2 events: {error}");
+                            log::error!(
+                                "Failed to initialize SDL2 events: {error}"
+                            );
                             return noop_fallback.make_supervised_progressor()(
                                 progress_data,
                                 common_data,
@@ -103,7 +108,9 @@ impl Progressor for Sdl2Progressor {
                     let video_subsystem = match sdl_context.video() {
                         Ok(subsystem) => subsystem,
                         Err(error) => {
-                            log::error!("Failed to initialize SDL2 video subsystem: {error}");
+                            log::error!(
+                                "Failed to initialize SDL2 video subsystem: {error}"
+                            );
                             return noop_fallback.make_supervised_progressor()(
                                 progress_data,
                                 common_data,
@@ -123,7 +130,9 @@ impl Progressor for Sdl2Progressor {
                     {
                         Ok(window) => window,
                         Err(error) => {
-                            log::error!("Failed to initialize SDL2 window: {error}");
+                            log::error!(
+                                "Failed to initialize SDL2 window: {error}"
+                            );
                             return noop_fallback.make_supervised_progressor()(
                                 progress_data,
                                 common_data,
@@ -135,9 +144,11 @@ impl Progressor for Sdl2Progressor {
                     // let mut canvas = match window.into_canvas().build() {
                     //     Ok(canvas) => canvas,
                     //     Err(error) => {
-                    //         log::error!("Failed to initialize SDL2 canvas: {error}");
-                    //         return noop_fallback.run_under_supervisor_for_real()(progress_data, common_data).await;
-                    //     },
+                    //         log::error!("Failed to initialize SDL2 canvas:
+                    // {error}");         return
+                    // noop_fallback.
+                    // run_under_supervisor_for_real()(progress_data,
+                    // common_data).await;     },
                     // };
 
                     use std::time::{Duration, Instant};
@@ -159,14 +170,22 @@ impl Progressor for Sdl2Progressor {
                             log::trace!(target: "sdl", "sdl event {:?} aaa 2", ev);
                             match ev {
                                 sdl2::event::Event::Quit { .. }
-                                | sdl2::event::Event::AppTerminating { .. } => {
+                                | sdl2::event::Event::AppTerminating {
+                                    ..
+                                } => {
                                     log::trace!(target: "sdl", "inside sdl loop on thread {:?} aaa 2", std::thread::current().id());
                                     quit_requested = true;
                                 }
-                                sdl2::event::Event::KeyDown { keycode, .. }
-                                | sdl2::event::Event::KeyUp { keycode, .. } => {
+                                sdl2::event::Event::KeyDown {
+                                    keycode, ..
+                                }
+                                | sdl2::event::Event::KeyUp {
+                                    keycode, ..
+                                } => {
                                     log::trace!(target: "sdl", "inside sdl loop on thread {:?} aaa 2", std::thread::current().id());
-                                    if keycode == Some(sdl2::keyboard::Keycode::Escape) {
+                                    if keycode
+                                        == Some(sdl2::keyboard::Keycode::Escape)
+                                    {
                                         quit_requested = true;
                                     }
                                 }
@@ -188,8 +207,10 @@ impl Progressor for Sdl2Progressor {
                             log::trace!(target: "sdl", "inside sdl loop on thread {:?} aaa bbb", std::thread::current().id());
                             // for y in 0..common_data.dimy.get() {
                             //     for x in 0..common_data.dimx.get() {
-                            //         let color = locked.image[(y, x)] * Color::splat(255.0);
-                            //         framebuffer[y][x] = *color.cast().as_array();
+                            //         let color = locked.image[(y, x)] *
+                            // Color::splat(255.0);
+                            //         framebuffer[y][x] =
+                            // *color.cast().as_array();
                             //     }
                             // }
                             log::debug!("Writing image sdl");
@@ -197,7 +218,9 @@ impl Progressor for Sdl2Progressor {
                             let mut surface = match window.surface(&events) {
                                 Ok(surface) => surface,
                                 Err(error) => {
-                                    panic!("Failed to initialize SDL2 window surface: {error}");
+                                    panic!(
+                                        "Failed to initialize SDL2 window surface: {error}"
+                                    );
                                 }
                             };
 
@@ -214,13 +237,18 @@ impl Progressor for Sdl2Progressor {
                                     )
                                 };
                                 log::debug!("sdl placing pixels");
-                                locked.placed_pixels.for_each_true(|row, col| {
-                                    let color = locked.image[(row, col)] * Color::splat(255.0);
-                                    let color = color.cast::<u8>();
-                                    // let color = u32::from_ne_bytes(color.to_array());
-                                    // canvas.pixel(col as _, row as _, color).unwrap();
-                                    data[(row, col)] = color.to_array();
-                                });
+                                locked.placed_pixels.for_each_true(
+                                    |row, col| {
+                                        let color = locked.image[(row, col)]
+                                            * Color::splat(255.0);
+                                        let color = color.cast::<u8>();
+                                        // let color =
+                                        // u32::from_ne_bytes(color.to_array());
+                                        // canvas.pixel(col as _, row as _,
+                                        // color).unwrap();
+                                        data[(row, col)] = color.to_array();
+                                    },
+                                );
                                 log::debug!("sdl placed pixels");
                             });
                             surface.finish().unwrap();

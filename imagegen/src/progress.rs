@@ -45,9 +45,7 @@ pub struct ProgressSupervisorData<'a> {
 pub trait Progressor: Send {
     /// Caller should run this in a new thread
     fn run_alone(&self, data: ProgressData, common_data: Arc<CommonData>) {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
         let progress_barrier = Arc::new(tokio::sync::Barrier::new(2));
         let fut = {
             let common_data = common_data.clone();
@@ -107,7 +105,8 @@ pub trait Progressor: Send {
         });
     }
 
-    /// Caller should call this function in another thread, and keep its result on that thread
+    /// Caller should call this function in another thread, and keep its result
+    /// on that thread
     fn make_supervised_progressor(
         &self,
     ) -> Box<
@@ -115,7 +114,8 @@ pub trait Progressor: Send {
             + for<'a> FnOnce(
                 ProgressData,
                 &'a ProgressSupervisorData<'a>,
-            ) -> Pin<Box<dyn Future<Output = ()> + 'a>>,
+            )
+                -> Pin<Box<dyn Future<Output = ()> + 'a>>,
     >;
 }
 
@@ -131,13 +131,17 @@ impl Progressor for ProgressSupervisor {
             + for<'a> FnOnce(
                 ProgressData,
                 &'a ProgressSupervisorData<'a>,
-            ) -> Pin<Box<dyn Future<Output = ()> + 'a>>,
+            )
+                -> Pin<Box<dyn Future<Output = ()> + 'a>>,
     > {
-        unreachable!("Cannot run ProgressSupervisor under another ProgressSupervisor")
+        unreachable!(
+            "Cannot run ProgressSupervisor under another ProgressSupervisor"
+        )
     }
 
     fn run_alone(&self, data: ProgressData, common_data: Arc<CommonData>) {
-        let progress_barrier = Arc::new(tokio::sync::Barrier::new(self.progressors.len() + 1));
+        let progress_barrier =
+            Arc::new(tokio::sync::Barrier::new(self.progressors.len() + 1));
 
         std::thread::scope(|scope| {
             for progressor in &self.progressors {
@@ -167,9 +171,8 @@ impl Progressor for ProgressSupervisor {
                 });
             }
 
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .build()
-                .unwrap();
+            let rt =
+                tokio::runtime::Builder::new_current_thread().build().unwrap();
             rt.block_on(async {
                 loop {
                     // Wait at the generator barrier first to ensure the generator is done writing
@@ -205,7 +208,8 @@ impl Progressor for NoOpProgressor {
             + for<'a> FnOnce(
                 ProgressData,
                 &'a ProgressSupervisorData<'a>,
-            ) -> Pin<Box<dyn Future<Output = ()> + 'a>>,
+            )
+                -> Pin<Box<dyn Future<Output = ()> + 'a>>,
     > {
         Box::new(|_progress_data, common_data| {
             Box::pin(async move {
@@ -236,16 +240,17 @@ pub fn opts() -> impl IntoIterator<Item = Opt> {
     ]
 }
 
-pub fn handle_opts(opts: &[GetoptItem]) -> (Box<dyn Progressor + Send>, ProgressData) {
+pub fn handle_opts(
+    opts: &[GetoptItem<'_>],
+) -> (Box<dyn Progressor + Send>, ProgressData) {
     let mut progressors: Vec<Box<dyn Progressor + Send>> = vec![];
     let mut progress_interval = None;
     let mut progress_count = None;
     for opt in opts {
         match opt {
-            GetoptItem::Opt {
-                opt,
-                arg: Some(filename),
-            } if opt.long.as_deref() == Some("progressfile") => {
+            GetoptItem::Opt { opt, arg: Some(filename) }
+                if opt.is_long("progressfile") =>
+            {
                 let file = std::fs::OpenOptions::new()
                     .write(true)
                     .create(true)
@@ -255,48 +260,54 @@ pub fn handle_opts(opts: &[GetoptItem]) -> (Box<dyn Progressor + Send>, Progress
                 progressors.push(Box::new(FileProgressor::new(file)));
             }
             GetoptItem::Opt { opt, arg: None }
-                if opt.long.as_deref() == Some("defaultprogressfile") =>
+                if opt.is_long("defaultprogressfile") =>
             {
-                todo!("open the default filename and make progress::file::FileProgressor")
+                todo!(
+                    "open the default filename and make progress::file::FileProgressor"
+                )
             }
-            GetoptItem::Opt { opt, arg: None } if opt.long.as_deref() == Some("progresstext") => {
+            GetoptItem::Opt { opt, arg: None }
+                if opt.is_long("progresstext") =>
+            {
                 progressors.push(Box::new(text::TextProgressor::new(|s| {
                     eprintln!("{}", s);
                 })));
             }
-            GetoptItem::Opt {
-                opt,
-                arg: Some(progress_interval_str),
-            } if opt.long.as_deref() == Some("progressinterval") => {
-                progress_interval = Some(progress_interval_str.parse().unwrap());
+            GetoptItem::Opt { opt, arg: Some(progress_interval_str) }
+                if opt.is_long("progressinterval") =>
+            {
+                progress_interval =
+                    Some(progress_interval_str.parse().unwrap());
             }
-            GetoptItem::Opt {
-                opt,
-                arg: Some(progress_count_str),
-            } if opt.long.as_deref() == Some("progresscount") => {
+            GetoptItem::Opt { opt, arg: Some(progress_count_str) }
+                if opt.is_long("progresscount") =>
+            {
                 progress_count = Some(progress_count_str.parse().unwrap());
             }
             #[cfg(feature = "sdl2")]
-            GetoptItem::Opt { opt, arg: None } if opt.long.as_deref() == Some("SDL") => {
+            GetoptItem::Opt { opt, arg: None } if opt.is_long("SDL") => {
                 progressors.push(Box::new(sdl::Sdl2Progressor {}));
             }
             #[cfg(not(feature = "sdl2"))]
-            GetoptItem::Opt { opt, arg: None } if opt.long.as_deref() == Some("SDL") => {
-                log::error!("Compiled without sdl2 support. Ignoring '--SDL' argument.");
+            GetoptItem::Opt { opt, arg: None } if opt.is_long("SDL") => {
+                log::error!(
+                    "Compiled without sdl2 support. Ignoring '--SDL' argument."
+                );
             }
-            GetoptItem::Opt {
-                opt,
-                arg: Some(_wait_time_str),
-            } if opt.long.as_deref() == Some("wait") => {
+            GetoptItem::Opt { opt, arg: Some(_wait_time_str) }
+                if opt.is_long("wait") =>
+            {
                 todo!("figure out wait handling")
             }
             #[cfg(feature = "framebuffer")]
-            GetoptItem::Opt { opt, arg } if opt.long.as_deref() == Some("framebuffer") => {
+            GetoptItem::Opt { opt, arg } if opt.is_long("framebuffer") => {
                 let fb_path = PathBuf::from(arg.unwrap_or("/dev/fb0"));
-                progressors.push(Box::new(framebuffer::FramebufferProgressor { fb_path }));
+                progressors.push(Box::new(
+                    framebuffer::FramebufferProgressor { fb_path },
+                ));
             }
             #[cfg(not(feature = "framebuffer"))]
-            GetoptItem::Opt { opt, .. } if opt.long.as_deref() == Some("framebuffer") => {
+            GetoptItem::Opt { opt, .. } if opt.is_long("framebuffer") => {
                 log::error!(
                     "Compiled without framebuffer support. Ignoring '--framebuffer' argument."
                 );

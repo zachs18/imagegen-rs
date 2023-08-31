@@ -20,7 +20,9 @@ pub fn opts() -> impl IntoIterator<Item = Opt> {
     ]
 }
 
-pub fn handle_opts(opts: &[GetoptItem]) -> (Arc<CommonData>, impl RngCore + Send) {
+pub fn handle_opts(
+    opts: &[GetoptItem<'_>],
+) -> (Arc<CommonData>, impl RngCore + Send) {
     let mut size = (None, None);
     let mut maxval = None;
     let mut seed = None;
@@ -39,22 +41,15 @@ pub fn handle_opts(opts: &[GetoptItem]) -> (Arc<CommonData>, impl RngCore + Send
 
     for opt in opts {
         match opt {
-            GetoptItem::Opt {
-                opt,
-                arg: Some(width),
-            } if opt.long.as_deref() == Some("x") => {
+            GetoptItem::Opt { opt, arg: Some(width) } if opt.is_long("x") => {
                 set!(width => size.0 => "width");
             }
-            GetoptItem::Opt {
-                opt,
-                arg: Some(height),
-            } if opt.long.as_deref() == Some("y") => {
+            GetoptItem::Opt { opt, arg: Some(height) } if opt.is_long("y") => {
                 set!(height => size.1 => "height");
             }
-            GetoptItem::Opt {
-                opt,
-                arg: Some(size_str),
-            } if opt.long.as_deref() == Some("size") => {
+            GetoptItem::Opt { opt, arg: Some(size_str) }
+                if opt.is_long("size") =>
+            {
                 let (width, height) = size_str
                     .split_once(',')
                     .or_else(|| size_str.split_once('x'))
@@ -62,30 +57,28 @@ pub fn handle_opts(opts: &[GetoptItem]) -> (Arc<CommonData>, impl RngCore + Send
                 set!(width => size.0 => "width");
                 set!(height => size.1 => "height");
             }
-            GetoptItem::Opt {
-                opt,
-                arg: Some(maxval_str),
-            } if opt.long.as_deref() == Some("maxval") => {
+            GetoptItem::Opt { opt, arg: Some(maxval_str) }
+                if opt.is_long("maxval") =>
+            {
                 set!(maxval_str => maxval => "maxval");
             }
-            GetoptItem::Opt {
-                opt,
-                arg: Some(seed_str),
-            } if opt.long.as_deref() == Some("seed") => {
+            GetoptItem::Opt { opt, arg: Some(seed_str) }
+                if opt.is_long("seed") =>
+            {
                 set!(seed_str => seed => "seed");
             }
             _ => {}
         }
     }
 
-    const DEFAULT_SIZE: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(256) };
+    const DEFAULT_SIZE: NonZeroUsize =
+        unsafe { NonZeroUsize::new_unchecked(256) };
 
-    let (dimx, dimy) = (
-        size.0.unwrap_or(DEFAULT_SIZE),
-        size.1.unwrap_or(DEFAULT_SIZE),
-    );
+    let (dimx, dimy) =
+        (size.0.unwrap_or(DEFAULT_SIZE), size.1.unwrap_or(DEFAULT_SIZE));
     let maxval = maxval.unwrap_or(255);
-    let size = NonZeroUsize::new(dimx.get().checked_mul(dimy.get()).unwrap()).unwrap();
+    let size =
+        NonZeroUsize::new(dimx.get().checked_mul(dimy.get()).unwrap()).unwrap();
 
     let image = PnmData {
         dimx: dimx.get() as u32,
