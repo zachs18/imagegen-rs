@@ -68,6 +68,7 @@ name = "bitmap"
 version = "0.1.0"
 dependencies = [
  "az",
+ "copy-range",
  "either",
  "itertools",
  "radium",
@@ -122,6 +123,12 @@ checksum = "2850f2f5a82cbf437dd5af4d49848fbdfc27c157c3d010345776f952765261c5"
 dependencies = [
  "os_str_bytes",
 ]
+
+[[package]]
+name = "copy-range"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "660cbf03f75e28f252bea61cdafb8efd6f8e49dac6873ab376233e9b3e99f66c"
 
 [[package]]
 name = "either"

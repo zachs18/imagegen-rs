@@ -7,6 +7,7 @@ use std::{
 };
 
 use aliasing::{Aliasing, UnaliasedAliasing, UnaliasedInnerBytesAliasing};
+use copy_range::CopyRange;
 use either::Either;
 use mutability::{ConstMutability, MutMutability, Mutability};
 
@@ -41,24 +42,6 @@ macro_rules! transmute {
 
 pub mod aliasing;
 pub mod mutability;
-
-#[derive(Debug, Clone, Copy)]
-struct CopyRange<T> {
-    start: T,
-    end: T,
-}
-
-impl<T> CopyRange<T> {
-    fn into_range(self) -> Range<T> {
-        self.start..self.end
-    }
-}
-
-impl<T> From<Range<T>> for CopyRange<T> {
-    fn from(value: Range<T>) -> Self {
-        Self { start: value.start, end: value.end }
-    }
-}
 
 /// A 2-D bitmap
 pub struct BitMap {
@@ -313,7 +296,7 @@ impl<'a, M: Mutability, A: Aliasing> Iterator for RawBytes<'a, M, A> {
     type Item = (*mut u8, ByteBitRange);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.inner.bits.into_range().is_empty() {
+        if self.inner.bits.is_empty() {
             return None;
         }
         let start_byte_idx = self.inner.bits.start / 8;
@@ -324,7 +307,7 @@ impl<'a, M: Mutability, A: Aliasing> Iterator for RawBytes<'a, M, A> {
 
         let ptr = self.inner.data.as_ptr().wrapping_add(start_byte_idx);
 
-        if self.inner.bits.into_range().is_empty() {
+        if self.inner.bits.is_empty() {
             self.inner.bits.start = self.inner.bits.end;
             Some((ptr, ByteBitRange::from(start_bit_idx..end_bit_idx)))
         } else {
@@ -333,7 +316,7 @@ impl<'a, M: Mutability, A: Aliasing> Iterator for RawBytes<'a, M, A> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        if self.inner.bits.into_range().is_empty() {
+        if self.inner.bits.is_empty() {
             (0, Some(0))
         } else {
             let start_byte_idx = self.inner.bits.start / 8;
@@ -354,7 +337,7 @@ impl<'a, M: Mutability, A: Aliasing> DoubleEndedIterator
     for RawBytes<'a, M, A>
 {
     fn next_back(&mut self) -> Option<Self::Item> {
-        if self.inner.bits.into_range().is_empty() {
+        if self.inner.bits.is_empty() {
             return None;
         }
         let start_bit_idx = (self.inner.bits.start % 8) as u8;
@@ -365,7 +348,7 @@ impl<'a, M: Mutability, A: Aliasing> DoubleEndedIterator
 
         let ptr = self.inner.data.as_ptr().wrapping_add(end_byte_idx);
 
-        if self.inner.bits.into_range().is_empty() {
+        if self.inner.bits.is_empty() {
             self.inner.bits.end = self.inner.bits.start;
             Some((ptr, ByteBitRange::from(start_bit_idx..end_bit_idx)))
         } else {
@@ -394,7 +377,7 @@ impl<'a, M: Mutability, A: Aliasing> BaseBitSlice<'a, M, A> {
     }
 
     pub fn len(&self) -> usize {
-        self.bits.into_range().len()
+        self.bits.len()
     }
 
     pub fn into_const(self) -> BaseBitSlice<'a, M::Const, A> {
@@ -431,6 +414,7 @@ impl<'a, M: Mutability, A: Aliasing> BaseBitSlice<'a, M, A> {
     /// * If this slice consists only of one partially-referenced byte, it will
     ///   be returned in the first edge `Option`, the middle part will be empty,
     ///   and the last edge `Option` will be `None`.
+    #[doc(alias = "split_edges_mut")]
     pub fn split_edges(
         self,
     ) -> (
@@ -452,14 +436,14 @@ impl<'a, M: Mutability, A: Aliasing> BaseBitSlice<'a, M, A> {
                 let mut middle = transmute!(self as BaseBitSlice);
                 middle.bits.end -= end_bit_idx;
                 last.bits.start = middle.bits.end;
-                if middle.bits.into_range().is_empty() {
+                if middle.bits.is_empty() {
                     (Some(last), middle, None)
                 } else {
                     (None, middle, Some(last))
                 }
             }
             (start_bit_idx, end_bit_idx) => {
-                if self.bits.into_range().len() == 0 {
+                if self.bits.len() == 0 {
                     (None, Default::default(), None)
                 } else {
                     let first_end = self.bits.start + (8 - start_bit_idx);
@@ -502,6 +486,7 @@ impl<'a, M: Mutability, A: Aliasing> BaseBitSlice<'a, M, A> {
 impl<'a, M: Mutability, A: UnaliasedInnerBytesAliasing> BaseBitSlice<'a, M, A> {
     /// Returns `Ok(slice)` if this slice is byte-aligned.
     /// Returns `Err(self)` otherwise.
+    #[doc(alias = "try_into_byte_aligned_mut")]
     pub fn try_into_byte_aligned(
         self,
     ) -> Result<BaseBitSlice<'a, M, UnaliasedNoEdges>, Self> {
@@ -512,9 +497,10 @@ impl<'a, M: Mutability, A: UnaliasedInnerBytesAliasing> BaseBitSlice<'a, M, A> {
         }
     }
 
+    #[doc(alias = "into_aliased_edges_mut")]
     pub fn into_aliased_edges(self) -> BaseBitSlice<'a, M, AliasedEdgesOnly> {
         #[cfg(debug_assertions)]
-        A::assert_bit_range_valid(self.bits.into_range());
+        A::assert_bit_range_valid(self.bits.into_std());
         transmute!(self as BaseBitSlice)
     }
 
@@ -540,6 +526,11 @@ impl<'a, M: Mutability, A: UnaliasedInnerBytesAliasing> BaseBitSlice<'a, M, A> {
     /// This requires marking the returned slices as possibly having aliased
     /// edges, since we cannot guarantee that the split will be performed at
     /// a byte boundary.
+    ///
+    /// # Panic
+    ///
+    /// Panics if `at >= self.len()`.
+    #[doc(alias = "split_at_mut")]
     pub fn split_at(
         self,
         at: usize,
@@ -566,6 +557,10 @@ impl<'a, M: Mutability, A: UnaliasedInnerBytesAliasing> BaseBitSlice<'a, M, A> {
     /// Unlike [`BaseBitSlice::split_at`], this method does not require changing
     /// the aliasing type. However, it only supports splitting at byte
     /// boundaries, or at the edges of the slice.
+    ///
+    /// # Panic
+    ///
+    /// Panics if `at >= self.len()`.
     pub fn try_split_at_no_additional_aliasing(
         self,
         at: usize,
@@ -649,7 +644,7 @@ impl<'a, M: Mutability, A: UnaliasedAliasing> BaseBitSlice<'a, M, A> {
 
     pub fn into_unaliased(self) -> BaseBitSlice<'a, M, Unaliased> {
         #[cfg(debug_assertions)]
-        A::assert_bit_range_valid(self.bits.into_range());
+        A::assert_bit_range_valid(self.bits.into_std());
         transmute!(self as BaseBitSlice)
     }
 }
@@ -697,10 +692,19 @@ impl<'a, M: ConstMutability, A: Aliasing> BaseBitSlice<'a, M, A> {
     ///
     /// * `bytes` does not reference any read-only memory (e.g. `bytes` is
     ///   empty).
-    /// * The returned slice is `UnaliasedBitSlice` and no `BitSlice` or
-    ///   `AliasedBitSlice` will be derived from the returned slice.
+    /// * `A: UnaliasedAliasing` and no bit slice with a weaker aliasing type
+    ///   will be derived from the returned slice.
     /// * `M: UnsyncMutability` and no bit slice with `M: SyncMutability` will
     ///   be derived from the returned slice.
+    /// * (Maybe?) atomic loads of read-only memory are defined on the platform
+    ///   being compiled for (not true on miri, e.g.).
+    ///
+    /// As a concrete example, it is sound to create/derive a
+    /// `BitSlice<ConstSync, Unaliased>` or a `BitSlice<ConstUnsync,
+    /// Aliased>` from the returned bit slice regardless of platform
+    /// support, but a `BitSlice<ConstSync, Aliased>` may only be soundly
+    /// created/derive from the returned bitslice if atomic reads of
+    /// `AtomicU8`s in read-only memory are defined on the target platform.
     pub unsafe fn from_bytes(
         bytes: &'a [u8],
         bits: impl RangeBounds<usize>,
@@ -752,7 +756,7 @@ impl<'a, M: ConstMutability, A: Aliasing> BaseBitSlice<'a, M, A> {
         let bits = verify_bit_range(bits).unwrap();
         let bits = CopyRange { start: bits.start.into(), end: bits.end.into() };
 
-        A::assert_bit_range_valid(bits.into_range());
+        A::assert_bit_range_valid(bits.into_std());
 
         let byte = &BYTES[value as usize];
         Self {
@@ -800,6 +804,13 @@ impl<'a, M: Mutability, A: Aliasing> BaseBitSlice<'a, M, A> {
 }
 
 impl<'a, M: Mutability, A: UnaliasedInnerBytesAliasing> BaseBitSlice<'a, M, A> {
+    /// Does not include partially-referenced bytes.
+    pub fn as_whole_bytes(&self) -> &[u8] {
+        let this = self.reborrow().split_edges().1;
+        this.into_bytes()
+    }
+
+    /// Does not include partially-referenced bytes.
     pub fn into_whole_bytes(self) -> &'a [u8] {
         let this = self.split_edges().1;
         this.into_bytes()
@@ -825,6 +836,22 @@ impl<'a, M: Mutability, A: UnaliasedAliasing> BaseBitSlice<'a, M, A> {
         unsafe {
             std::slice::from_raw_parts_mut(ptr, byte_idx_end - byte_idx_start)
         }
+    }
+}
+
+impl<'a, M: MutMutability, A: UnaliasedInnerBytesAliasing>
+    BaseBitSlice<'a, M, A>
+{
+    /// Does not include partially-referenced bytes.
+    pub fn as_whole_bytes_mut(&mut self) -> &mut [u8] {
+        let this = self.reborrow_mut().split_edges().1;
+        this.into_bytes_mut()
+    }
+
+    /// Does not include partially-referenced bytes.
+    pub fn into_whole_bytes_mut(self) -> &'a mut [u8] {
+        let this = self.split_edges().1;
+        this.into_bytes_mut()
     }
 }
 
@@ -930,7 +957,7 @@ impl<'a, M: Mutability, A: Aliasing> BitMapView<'a, M, A> {
     }
 
     pub fn into_rows(self) -> impl Iterator<Item = BaseBitSlice<'a, M, A>> {
-        self.rows.into_range().map(move |row| {
+        self.rows.into_iter().map(move |row| {
             let start_byte_idx = self.stride.checked_mul(row).unwrap();
             let data =
                 NonNull::new(self.data.as_ptr().wrapping_add(start_byte_idx))
@@ -1137,7 +1164,7 @@ impl<'a, M: Mutability, A: Aliasing> Iterator for Bits<'a, M, A> {
 impl<'a, M: Mutability, A: Aliasing> ExactSizeIterator for Bits<'a, M, A> {
     fn len(&self) -> usize {
         self.first_bits.len()
-            + self.inner.inner.bits.into_range().len()
+            + self.inner.inner.bits.len()
             + self.last_bits.len()
     }
 }

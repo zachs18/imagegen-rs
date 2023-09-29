@@ -138,7 +138,7 @@ unsafe impl Aliasing for Aliased {
         slice: BaseBitSlice<'a, M, Self>,
         bit_idx: usize,
     ) -> u8 {
-        debug_assert!(slice.bits.into_range().contains(&bit_idx));
+        debug_assert!(slice.bits.contains(&bit_idx));
         let byte_idx = bit_idx / 8;
         let byte_ptr =
             unsafe { slice.data.as_ptr().cast_const().add(byte_idx) };
@@ -238,7 +238,7 @@ unsafe impl Aliasing for AliasedEdgesOnly {
         slice: BaseBitSlice<'a, M, Self>,
         bit_idx: usize,
     ) -> u8 {
-        debug_assert!(slice.bits.into_range().contains(&bit_idx));
+        debug_assert!(slice.bits.contains(&bit_idx));
         let byte_idx = bit_idx / 8;
         let full_byte_range =
             div_ceil_8(slice.bits.start)..div_floor_8(slice.bits.end);
@@ -289,7 +289,7 @@ unsafe impl Aliasing for Unaliased {
         slice: BaseBitSlice<'a, M, Self>,
         bit_idx: usize,
     ) -> u8 {
-        debug_assert!(slice.bits.into_range().contains(&bit_idx));
+        debug_assert!(slice.bits.contains(&bit_idx));
         unsafe { *slice.data.as_ptr().cast_const().add(bit_idx / 8) }
     }
 
@@ -330,7 +330,7 @@ unsafe impl Aliasing for UnaliasedNoEdges {
         slice: BaseBitSlice<'a, M, Self>,
         bit_idx: usize,
     ) -> u8 {
-        debug_assert!(slice.bits.into_range().contains(&bit_idx));
+        debug_assert!(slice.bits.contains(&bit_idx));
         unsafe { *slice.data.as_ptr().cast_const().add(bit_idx / 8) }
     }
 
@@ -395,7 +395,7 @@ unsafe impl<A: Aliasing> Aliasing for JustAnEdge<A> {
         bit_idx: usize,
     ) -> u8 {
         #[cfg(debug_assertions)]
-        Self::assert_bit_range_valid(slice.bits.into_range());
+        Self::assert_bit_range_valid(slice.bits.into_std());
         let forget_just_edge: BaseBitSlice<'a, M, A> =
             transmute!(slice as BaseBitSlice);
         unsafe { A::load_byte_containing(forget_just_edge, bit_idx) }

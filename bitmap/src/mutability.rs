@@ -9,14 +9,14 @@ use radium::Radium;
 /// can orthogonally either represent thread-safe ([`SyncMutability`]) or
 /// non-thread-safe ([`UnsyncMutability`]) bit collections.
 ///
-/// Note that the thread-safety of a bit collection type only applies to the
-/// "edges" of the bit collection, i.e. bytes to which the bit collection does
-/// not wholly refer, and whose other bits may have a different mutability under
-/// a different reference. The thread-safety of a bit collection can be changed
-/// if the bit collection only refers to entire bytes, or (in the case of
-/// [`UnaliasedBitSlice`]) as a static guarantee that the other bits of the
-/// "edges" are not referred to by anything that could violate aliasing rules by
-/// using non-atomic loads/stores.
+/// Note that the thread-safety of a non-semantically-aliased bit collection
+/// type only applies to the "edges" of the bit collection, i.e. bytes
+/// to which the bit collection does not wholly refer, and whose other bits may
+/// have a different mutability under a different reference. The thread-safety
+/// of such a bit collection can be changed if the bit collection only refers to
+/// entire bytes, or (in the case of [`UnaliasedBitSlice`]) as a static
+/// guarantee that the other bits of the "edges" are not referred to by anything
+/// that could violate aliasing rules by using non-atomic loads/stores.
 pub unsafe trait Mutability: Sized + std::fmt::Debug + 'static {
     type Mut: MutMutability;
     type Const: ConstMutability;
@@ -33,8 +33,8 @@ unsafe impl<M: Mutability<Mut = M>> MutMutability for M {}
 
 /// Bit slices with this mutability do not allow mutating the bits of the slice.
 ///
-/// Note that, if the bit slice's aliasing type is `Aliased` or
-/// `AliasedNoEdges`, the bits may change through other references.
+/// Note that, if the bit slice's aliasing type is semantically aliased, the
+/// bits may change through other references.
 pub unsafe trait ConstMutability:
     Mutability<Const = Self> + Copy
 {
@@ -58,7 +58,7 @@ unsafe impl<M: Mutability<Edge = Cell<u8>, Unsync = Self>> UnsyncMutability
 {
 }
 
-/// This mutability marker type indicates that a given bit slice references is
+/// This mutability marker type indicates that a given bit slice reference is
 /// mutable and thread-safe.
 ///
 /// Bit slices references with this mutability are not `Copy`.
