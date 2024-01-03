@@ -5,7 +5,7 @@ use std::{
     os::fd::AsRawFd,
     path::PathBuf,
     pin::Pin,
-    simd::{simd_swizzle, SimdFloat},
+    simd::{num::SimdFloat, simd_swizzle},
     sync::atomic::Ordering,
 };
 
@@ -77,33 +77,48 @@ impl Progressor for FramebufferProgressor {
             + for<'a> FnOnce(
                 super::ProgressData,
                 &'a super::ProgressSupervisorData<'a>,
-            ) -> Pin<Box<dyn std::future::Future<Output = ()> + 'a>>,
+            ) -> Pin<
+                Box<dyn std::future::Future<Output = ()> + 'a>,
+            >,
     > {
         let noop_fallback = NoOpProgressor;
 
-        let fb = match File::options().write(true).read(true).open(&self.fb_path) {
-            Ok(fb) => fb,
-            Err(err) => {
-                log::error!("Failed to open framebuffer {:?}: {}", self.fb_path, err);
-                return noop_fallback.make_supervised_progressor();
-            }
-        };
+        let fb =
+            match File::options().write(true).read(true).open(&self.fb_path) {
+                Ok(fb) => fb,
+                Err(err) => {
+                    log::error!(
+                        "Failed to open framebuffer {:?}: {}",
+                        self.fb_path,
+                        err
+                    );
+                    return noop_fallback.make_supervised_progressor();
+                }
+            };
 
         let fbfd = fb.as_raw_fd();
         let mut finfo = MaybeUninit::<raw::fb_fix_screeninfo>::uninit();
         let mut vinfo = MaybeUninit::<raw::fb_var_screeninfo>::uninit();
         let (finfo, vinfo) = unsafe {
             // Get framebuffer fixed screen information
-            if libc::ioctl(fbfd, raw::FBIOGET_FSCREENINFO, finfo.as_mut_ptr()) != 0 {
+            if libc::ioctl(fbfd, raw::FBIOGET_FSCREENINFO, finfo.as_mut_ptr())
+                != 0
+            {
                 let err = Error::last_os_error();
-                log::error!("Failed to read framebuffer fixed information: {err}");
+                log::error!(
+                    "Failed to read framebuffer fixed information: {err}"
+                );
                 return noop_fallback.make_supervised_progressor();
             }
 
             // Get framebuffer variable screen information
-            if libc::ioctl(fbfd, raw::FBIOGET_VSCREENINFO, vinfo.as_mut_ptr()) != 0 {
+            if libc::ioctl(fbfd, raw::FBIOGET_VSCREENINFO, vinfo.as_mut_ptr())
+                != 0
+            {
                 let err = Error::last_os_error();
-                log::error!("Failed to read framebuffer variable information: {err}");
+                log::error!(
+                    "Failed to read framebuffer variable information: {err}"
+                );
                 return noop_fallback.make_supervised_progressor();
             }
 
@@ -111,7 +126,9 @@ impl Progressor for FramebufferProgressor {
         };
 
         if let Err(_) = usize::try_from(u32::MAX) {
-            log::error!("This framebuffer code does not support 16-bit (How are you running linux on a 16-bit platform anyway?)");
+            log::error!(
+                "This framebuffer code does not support 16-bit (How are you running linux on a 16-bit platform anyway?)"
+            );
             return noop_fallback.make_supervised_progressor();
         }
 
@@ -155,7 +172,10 @@ impl Progressor for FramebufferProgressor {
                         common_data.dimx,
                         vinfo.xres_virtual
                     );
-                    return noop_fallback.make_supervised_progressor()(progress_data, common_data);
+                    return noop_fallback.make_supervised_progressor()(
+                        progress_data,
+                        common_data,
+                    );
                 }
                 if common_data.dimy.get() > framebuffer.height {
                     log::error!(
@@ -163,7 +183,10 @@ impl Progressor for FramebufferProgressor {
                         common_data.dimy,
                         vinfo.yres_virtual
                     );
-                    return noop_fallback.make_supervised_progressor()(progress_data, common_data);
+                    return noop_fallback.make_supervised_progressor()(
+                        progress_data,
+                        common_data,
+                    );
                 }
 
                 Box::pin(async move {
@@ -183,10 +206,15 @@ impl Progressor for FramebufferProgressor {
                             let locked = common_data.locked.read().unwrap();
                             for y in 0..common_data.dimy.get() {
                                 for x in 0..common_data.dimx.get() {
-                                    let color = locked.image[(y, x)] * Color::splat(255.0);
-                                    // framebuffer[y][x] = *color.cast().as_array();
-                                    framebuffer[y][x] =
-                                        simd_swizzle!(color.cast(), [2, 1, 0, 3]).to_array();
+                                    let color = locked.image[(y, x)]
+                                        * Color::splat(255.0);
+                                    // framebuffer[y][x] =
+                                    // *color.cast().as_array();
+                                    framebuffer[y][x] = simd_swizzle!(
+                                        color.cast(),
+                                        [2, 1, 0, 3]
+                                    )
+                                    .to_array();
                                 }
                             }
                         }

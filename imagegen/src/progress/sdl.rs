@@ -2,7 +2,7 @@ use std::{
     marker::PhantomData,
     ops::{Index, IndexMut},
     pin::Pin,
-    simd::SimdFloat,
+    simd::num::SimdFloat,
     sync::atomic::Ordering,
 };
 

@@ -1,4 +1,4 @@
-use std::simd::SimdFloat;
+use std::simd::num::SimdFloat;
 
 use crate::color::{Channel, Color};
 
@@ -29,7 +29,10 @@ impl std::ops::IndexMut<(usize, usize)> for PnmData {
 }
 
 impl PnmData {
-    pub fn write_to<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
+    pub fn write_to<W: std::io::Write>(
+        &self,
+        mut writer: W,
+    ) -> std::io::Result<()> {
         if self.maxval > 255 {
             todo!("16-bit pnm");
         }
