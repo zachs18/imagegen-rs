@@ -12,4 +12,4 @@ either = "1.9.0"
 radium = "1.0.0"
 
 [dev-dependencies]
-itertools = "0.11.0"
+itertools = "0.13.0"

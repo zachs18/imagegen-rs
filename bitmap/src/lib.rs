@@ -982,7 +982,7 @@ impl<'a, M: Mutability, A: Aliasing> BitMapView<'a, M, A> {
         self.chunks().map(|(_y, _x, slice)| slice.count_ones()).sum()
     }
 
-    #[cfg(any)]
+    #[cfg(any())]
     pub fn count_ones(&self) -> usize {
         let mut count_ones = 0;
         'rows: for row in 0..self.height {
