@@ -320,8 +320,7 @@ impl<'a, M: Mutability, A: Aliasing> Iterator for RawBytes<'a, M, A> {
             (0, Some(0))
         } else {
             let start_byte_idx = self.inner.bits.start / 8;
-            let start_bit_idx = (self.inner.bits.start % 8) as u8;
-            let end_byte_idx = self.inner.bits.start / 8;
+            let end_byte_idx = self.inner.bits.end / 8;
             let end_bit_idx = (self.inner.bits.end % 8) as u8;
             let count = if end_bit_idx == 0 {
                 end_byte_idx - start_byte_idx

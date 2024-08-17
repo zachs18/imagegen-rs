@@ -279,7 +279,7 @@ impl Generator for InnerGenerator {
                     .pixels_generated
                     .fetch_add(colors.len(), Ordering::SeqCst);
                 {
-                    let CommonLockedData { image, placed_pixels, edges } =
+                    let CommonLockedData { image, edges, .. } =
                         &*common_data.locked.read().unwrap();
 
                     for edge in 0..edges.len() {
@@ -368,6 +368,7 @@ impl Generator for InnerGenerator {
                 edges_rx: tokio::sync::mpsc::Receiver<Range<usize>>,
                 best_places_tx:
                     tokio::sync::mpsc::Sender<Vec<Option<(Pixel, Channel)>>>,
+                #[allow(unused)]
                 data: GeneratorData,
                 common_data: Arc<CommonData>,
                 generator: InnerGenerator, /* TODO: something better than
@@ -420,8 +421,8 @@ impl Generator for InnerGenerator {
                                 let locked = data.common_data.locked.read().unwrap();
                                 let CommonLockedData {
                                     image,
-                                    placed_pixels,
                                     edges,
+                                    ..
                                 } = &*locked;
 
                                 log::trace!("recv'ing edge range");
